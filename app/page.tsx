@@ -1,0 +1,655 @@
+"use client";
+
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Cloud,
+  HardDrive,
+  Info,
+  Leaf,
+  Loader2,
+  RefreshCw,
+  ShoppingBasket,
+  Snowflake,
+  Sparkles,
+  Sun,
+  Utensils,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BalanceCard } from "@/components/balance-card";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { InfoModal } from "@/components/info-modal";
+import { MealCard } from "@/components/meal-card";
+import { MealModal } from "@/components/meal-modal";
+import { ShoppingList } from "@/components/shopping-list";
+import {
+  DAYS,
+  addDaysISO,
+  formatDayNumber,
+  formatRelativeWeek,
+  formatWeekLong,
+  formatWeekRange,
+  getMondayISO,
+  getSeasonContext,
+  getWeekNumber,
+  isCurrentWeek,
+  toISODate,
+} from "@/lib/dates";
+import {
+  buildShoppingList,
+  generateWeekPlan,
+  getPlanRecipe,
+  getPlanStats,
+  getRecentRecipeIds,
+  pickRecipeForSlot,
+} from "@/lib/planner";
+import { getRecipe } from "@/lib/recipes";
+import { loadPlans, savePlan, type StorageMode } from "@/lib/storage";
+import { isSupabaseConfigured } from "@/lib/supabase";
+import type { MealKey, SeasonMode, WeekPlan } from "@/lib/types";
+
+interface ToastState {
+  id: number;
+  message: string;
+}
+
+export default function HomePage() {
+  const [weekStart, setWeekStart] = useState<string | null>(null);
+  const [todayISO, setTodayISO] = useState<string | null>(null);
+  const [plans, setPlans] = useState<WeekPlan[]>([]);
+  const [mode, setMode] = useState<StorageMode>("local");
+  const [syncError, setSyncError] = useState<string | undefined>();
+  const [loading, setLoading] = useState(true);
+  const [selectedSeason, setSelectedSeason] = useState<SeasonMode>("auto");
+  const [modalMeal, setModalMeal] = useState<MealKey | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const warnedRef = useRef(false);
+
+  const notify = useCallback((message: string) => {
+    setToast({ id: Date.now(), message });
+  }, []);
+
+  const closeMealModal = useCallback(() => setModalMeal(null), []);
+  const closeConfirm = useCallback(() => setConfirmOpen(false), []);
+  const closeInfo = useCallback(() => setInfoOpen(false), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const currentWeek = getMondayISO(new Date());
+    setWeekStart(currentWeek);
+    setTodayISO(toISODate(new Date()));
+
+    loadPlans()
+      .then((result) => {
+        if (cancelled) return;
+
+        let nextPlans = result.plans;
+        let currentPlan = nextPlans.find((plan) => plan.weekStart === currentWeek);
+
+        if (!currentPlan) {
+          currentPlan = generateWeekPlan(currentWeek, "auto", nextPlans);
+          nextPlans = [...nextPlans, currentPlan].sort((left, right) =>
+            left.weekStart.localeCompare(right.weekStart),
+          );
+          void savePlan(currentPlan).then((saveResult) => {
+            if (cancelled) return;
+            setMode(saveResult.mode);
+            if (saveResult.error) setSyncError(saveResult.error);
+          });
+        }
+
+        setPlans(nextPlans);
+        setMode(result.mode);
+        setSelectedSeason(currentPlan.seasonMode);
+        if (result.error) setSyncError(result.error);
+        setLoading(false);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setSyncError(
+          error instanceof Error ? error.message : "No se pudo cargar la planificación.",
+        );
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!syncError || warnedRef.current) return;
+    warnedRef.current = true;
+    notify("No se pudo conectar con Supabase. Guardando en este dispositivo.");
+  }, [syncError, notify]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const currentPlan = useMemo(
+    () => plans.find((plan) => plan.weekStart === weekStart),
+    [plans, weekStart],
+  );
+
+  const stats = useMemo(
+    () => (currentPlan ? getPlanStats(currentPlan) : null),
+    [currentPlan],
+  );
+
+  const uniqueDishes = useMemo(
+    () =>
+      currentPlan
+        ? new Set(Object.values(currentPlan.meals).filter(Boolean)).size
+        : 0,
+    [currentPlan],
+  );
+
+  const plannedMeals = useMemo(
+    () =>
+      currentPlan
+        ? Object.values(currentPlan.meals).filter(Boolean).length
+        : 0,
+    [currentPlan],
+  );
+
+  const shoppingCount = useMemo(
+    () =>
+      currentPlan
+        ? buildShoppingList(currentPlan).reduce(
+            (sum, group) => sum + group.items.length,
+            0,
+          )
+        : 0,
+    [currentPlan],
+  );
+
+  const persist = useCallback(
+    (plan: WeekPlan) => {
+      const stamped: WeekPlan = {
+        ...plan,
+        updatedAt: new Date().toISOString(),
+      };
+
+      setPlans((previous) => {
+        const exists = previous.some((item) => item.weekStart === stamped.weekStart);
+        const next = exists
+          ? previous.map((item) =>
+              item.weekStart === stamped.weekStart ? stamped : item,
+            )
+          : [...previous, stamped];
+        return next.sort((left, right) =>
+          left.weekStart.localeCompare(right.weekStart),
+        );
+      });
+
+      void savePlan(stamped).then((result) => {
+        setMode(result.mode);
+        if (result.error) setSyncError(result.error);
+        else setSyncError(undefined);
+      });
+    },
+    [],
+  );
+
+  const handleGenerate = useCallback(
+    (targetWeek = weekStart, seasonMode = selectedSeason) => {
+      if (!targetWeek) return;
+      const history = plans.filter((plan) => plan.weekStart !== targetWeek);
+      const next = generateWeekPlan(targetWeek, seasonMode, history);
+      persist(next);
+      notify("Semana generada con equilibrio y temporada");
+    },
+    [weekStart, selectedSeason, plans, persist, notify],
+  );
+
+  const requestGenerate = () => {
+    if (currentPlan) {
+      setConfirmOpen(true);
+      return;
+    }
+    handleGenerate();
+  };
+
+  const handleSeasonChange = (nextMode: SeasonMode) => {
+    setSelectedSeason(nextMode);
+    if (currentPlan) {
+      persist({ ...currentPlan, seasonMode: nextMode });
+      notify("Temporada guardada. Regenera para aplicarla a los platos.");
+    } else {
+      notify(
+        nextMode === "auto"
+          ? "Temporada automática"
+          : `Temporada de ${nextMode}`,
+      );
+    }
+  };
+
+  const goToWeek = (offset: number) => {
+    if (!weekStart) return;
+    const nextWeek = addDaysISO(weekStart, offset * 7);
+    const nextPlan = plans.find((plan) => plan.weekStart === nextWeek);
+    setWeekStart(nextWeek);
+    setSelectedSeason(nextPlan?.seasonMode ?? "auto");
+    setModalMeal(null);
+  };
+
+  const goToCurrentWeek = () => {
+    const currentWeek = getMondayISO(new Date());
+    const nextPlan = plans.find((plan) => plan.weekStart === currentWeek);
+    setWeekStart(currentWeek);
+    setSelectedSeason(nextPlan?.seasonMode ?? "auto");
+    setModalMeal(null);
+  };
+
+  const handleQuickSwap = (mealKey: MealKey) => {
+    if (!currentPlan) return;
+    const currentRecipe = getRecipe(currentPlan.meals[mealKey]);
+    if (!currentRecipe) return;
+
+    const usedIds = new Set(
+      Object.entries(currentPlan.meals)
+        .filter(([key]) => key !== mealKey)
+        .map(([, recipeId]) => recipeId),
+    );
+    const recentIds = getRecentRecipeIds(plans, currentPlan.weekStart);
+    const season = getSeasonContext(
+      currentPlan.weekStart,
+      currentPlan.seasonMode,
+    );
+    const mealType = mealKey.endsWith("-comida") ? "comida" : "cena";
+
+    const replacement = pickRecipeForSlot({
+      requirement: {
+        category: currentRecipe.category,
+        fishKind: currentRecipe.fishKind,
+      },
+      mealType,
+      usedIds,
+      recentIds,
+      climate: season.climate,
+      excludeId: currentRecipe.id,
+    });
+
+    if (!replacement) {
+      notify("No hay otra opción disponible para este hueco");
+      return;
+    }
+
+    persist({
+      ...currentPlan,
+      meals: { ...currentPlan.meals, [mealKey]: replacement.id },
+    });
+    notify("Plato cambiado");
+  };
+
+  const handleSelect = (mealKey: MealKey, recipeId: string) => {
+    if (!currentPlan) return;
+    persist({
+      ...currentPlan,
+      meals: { ...currentPlan.meals, [mealKey]: recipeId },
+    });
+    notify("Plato actualizado");
+  };
+
+  const handleSwap = (from: MealKey, to: MealKey) => {
+    if (!currentPlan) return;
+    const meals = { ...currentPlan.meals };
+    const fromRecipe = meals[from];
+    meals[from] = meals[to];
+    meals[to] = fromRecipe;
+    persist({ ...currentPlan, meals });
+    notify("Platos intercambiados");
+  };
+
+  const scrollToShopping = () => {
+    document
+      .getElementById("shopping")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  if (loading || !weekStart) {
+    return (
+      <div className="loading-screen">
+        <div className="loading-brand">
+          <span className="loading-mark">
+            <Leaf size={24} />
+          </span>
+          <span>Mesa</span>
+        </div>
+        <div className="loading-status">
+          <Loader2 size={16} className="spin" />
+          Preparando tu semana…
+        </div>
+      </div>
+    );
+  }
+
+  const season = getSeasonContext(weekStart, selectedSeason);
+  const weekNumber = getWeekNumber(weekStart);
+  const supabaseConfigured = isSupabaseConfigured();
+  const syncTitle =
+    mode === "cloud"
+      ? "Tus semanas se guardan en Supabase y en este dispositivo."
+      : syncError ??
+        (supabaseConfigured
+          ? "No se pudo conectar con Supabase. Usando almacenamiento local."
+          : "Configura Supabase para guardar tus semanas en la nube.");
+
+  return (
+    <div className="app">
+      <header className="topbar">
+        <div className="topbar-inner">
+          <button className="brand" type="button" onClick={goToCurrentWeek}>
+            <span className="brand-mark">
+              <Leaf size={17} />
+            </span>
+            <span className="brand-name">Mesa</span>
+            <span className="brand-sep" />
+            <span className="brand-sub">Planificador semanal</span>
+          </button>
+
+          <div className="topbar-actions">
+            <button
+              className={`sync-pill ${mode} ${syncError ? "has-error" : ""}`}
+              type="button"
+              onClick={() => setInfoOpen(true)}
+              title={syncTitle}
+              aria-label={syncTitle}
+            >
+              {mode === "cloud" ? <Cloud size={14} /> : <HardDrive size={14} />}
+              <span>{mode === "cloud" ? "Sincronizado" : "Solo este dispositivo"}</span>
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={() => setInfoOpen(true)}
+              aria-label="Cómo funciona"
+              title="Cómo funciona"
+            >
+              <Info size={17} />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="page">
+        <section className="hero">
+          <div className="hero-copy">
+            <div className="eyebrow">
+              <Sparkles size={14} />
+              Semana {weekNumber} · {formatRelativeWeek(weekStart)}
+            </div>
+            <h1>
+              Comer bien,
+              <br />
+              <em>sin pensarlo.</em>
+            </h1>
+            <p className="hero-lead">
+              Una semana de comidas y cenas equilibradas, con temporada, variedad y
+              lista de la compra incluida. Cámbiala cuando te apetezca.
+            </p>
+            <div className="hero-actions">
+              <button className="btn btn-primary" type="button" onClick={requestGenerate}>
+                <RefreshCw size={17} />
+                {currentPlan ? "Regenerar semana" : "Generar semana"}
+              </button>
+              <button className="btn btn-secondary" type="button" onClick={scrollToShopping}>
+                <ShoppingBasket size={17} />
+                Lista de la compra
+                {shoppingCount > 0 && <span className="btn-count">{shoppingCount}</span>}
+              </button>
+            </div>
+          </div>
+
+          <aside className="hero-panel">
+            <div className="hero-panel-top">
+              <span className="hero-panel-label">
+                <CalendarDays size={13} />
+                Semana {weekNumber}
+              </span>
+              <button
+                className="today-link"
+                type="button"
+                onClick={goToCurrentWeek}
+                disabled={isCurrentWeek(weekStart)}
+              >
+                Hoy
+              </button>
+            </div>
+
+            <div className="week-nav">
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => goToWeek(-1)}
+                aria-label="Semana anterior"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <div className="week-nav-copy">
+                <strong>{formatWeekRange(weekStart)}</strong>
+                <span>{formatWeekLong(weekStart)}</span>
+              </div>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => goToWeek(1)}
+                aria-label="Semana siguiente"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+
+            <div className="season-block">
+              <div className="season-title">
+                <span>
+                  {season.key === "invierno" ? <Snowflake size={14} /> : <Sun size={14} />}
+                  Temporada
+                </span>
+                <strong>{season.label}</strong>
+              </div>
+              <div className="segmented">
+                <button
+                  type="button"
+                  className={selectedSeason === "auto" ? "active" : ""}
+                  onClick={() => handleSeasonChange("auto")}
+                >
+                  Auto
+                </button>
+                <button
+                  type="button"
+                  className={selectedSeason === "verano" ? "active" : ""}
+                  onClick={() => handleSeasonChange("verano")}
+                >
+                  <Sun size={13} />
+                  Verano
+                </button>
+                <button
+                  type="button"
+                  className={selectedSeason === "invierno" ? "active" : ""}
+                  onClick={() => handleSeasonChange("invierno")}
+                >
+                  <Snowflake size={13} />
+                  Invierno
+                </button>
+              </div>
+              <p className="season-hint">{season.hint}</p>
+            </div>
+
+            <div className="hero-mini-stats">
+              <div>
+                <strong>{plannedMeals}</strong>
+                <span>platos</span>
+              </div>
+              <div>
+                <strong>{uniqueDishes}</strong>
+                <span>distintos</span>
+              </div>
+              <div>
+                <strong>{stats?.balanced ? "Sí" : "—"}</strong>
+                <span>equilibrada</span>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <div className="content-grid">
+          <section className="planner-panel" aria-label="Planificación semanal">
+            <header className="planner-head">
+              <div>
+                <span className="side-kicker">Planificación</span>
+                <h2>Tu semana</h2>
+                <p>
+                  {currentPlan
+                    ? `${formatWeekRange(weekStart)} · 7 comidas y 7 cenas`
+                    : `${formatWeekRange(weekStart)} · todavía sin planificar`}
+                </p>
+              </div>
+              <div className="planner-legend">
+                <span>
+                  <Utensils size={13} />
+                  Comida
+                </span>
+                <span>
+                  <span className="legend-moon">☾</span>
+                  Cena
+                </span>
+              </div>
+            </header>
+
+            {currentPlan ? (
+              <>
+                <div className="week-scroll">
+                  <div className="week-grid">
+                    {DAYS.map((day, index) => {
+                      const date = addDaysISO(weekStart, index);
+                      const isToday = date === todayISO;
+
+                      return (
+                        <div className={`day-column ${isToday ? "today" : ""}`} key={day.id}>
+                          <div className="day-header">
+                            <span className="day-name">{day.label}</span>
+                            <span className="day-date">{formatDayNumber(date)}</span>
+                          </div>
+                          <MealCard
+                            mealKey={`${day.id}-comida`}
+                            mealType="comida"
+                            recipe={getPlanRecipe(currentPlan, `${day.id}-comida`)}
+                            onOpen={() => setModalMeal(`${day.id}-comida`)}
+                            onQuickSwap={() => handleQuickSwap(`${day.id}-comida`)}
+                          />
+                          <MealCard
+                            mealKey={`${day.id}-cena`}
+                            mealType="cena"
+                            recipe={getPlanRecipe(currentPlan, `${day.id}-cena`)}
+                            onOpen={() => setModalMeal(`${day.id}-cena`)}
+                            onQuickSwap={() => handleQuickSwap(`${day.id}-cena`)}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <p className="scroll-hint">
+                  <ChevronLeft size={13} />
+                  Desliza para ver la semana
+                  <ChevronRight size={13} />
+                </p>
+                <div className="planner-foot">
+                  <span>
+                    <Sparkles size={13} />
+                    {season.label} · sin repetir en 3 semanas
+                  </span>
+                  <span className={stats?.balanced ? "foot-ok" : "foot-off"}>
+                    {stats?.balanced ? "Reparto perfecto" : "Reparto personalizado"}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="empty-week">
+                <span className="empty-plate">
+                  <Utensils size={28} />
+                </span>
+                <h3>Esta semana está en blanco</h3>
+                <p>
+                  Genera 14 platos con el reparto equilibrado y la temporada que elijas.
+                </p>
+                <button className="btn btn-primary" type="button" onClick={requestGenerate}>
+                  <Sparkles size={16} />
+                  Generar esta semana
+                </button>
+              </div>
+            )}
+          </section>
+
+          <aside className="sidebar" id="shopping">
+            <BalanceCard plan={currentPlan} onRebalance={requestGenerate} />
+            <ShoppingList plan={currentPlan} onToast={notify} />
+            <div className="side-tip">
+              <span className="side-tip-icon">
+                <Leaf size={17} />
+              </span>
+              <div>
+                <strong>Cambia el plan, no la calma</strong>
+                <p>
+                  Toca cualquier plato para cambiarlo, buscar otra opción o moverlo a otro
+                  día de la semana.
+                </p>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <footer className="footer">
+          <span>Mesa · planificación semanal</span>
+          <span>Hecho para comer mejor, con menos dudas.</span>
+        </footer>
+      </main>
+
+      <MealModal
+        open={Boolean(modalMeal)}
+        mealKey={modalMeal}
+        plan={currentPlan ?? null}
+        plans={plans}
+        seasonMode={currentPlan?.seasonMode ?? selectedSeason}
+        onClose={closeMealModal}
+        onSelect={handleSelect}
+        onSwap={handleSwap}
+        onSuggest={handleQuickSwap}
+      />
+
+      <ConfirmDialog
+        open={confirmOpen}
+        title="¿Regenerar la semana?"
+        description="Se elegirán 14 platos nuevos y se perderán los cambios manuales de esta semana. La lista de la compra también se actualizará."
+        confirmLabel="Regenerar"
+        icon={<RefreshCw size={22} />}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          handleGenerate();
+        }}
+        onClose={closeConfirm}
+      />
+
+      <InfoModal
+        open={infoOpen}
+        mode={mode}
+        syncError={syncError}
+        onClose={closeInfo}
+      />
+
+      {toast && (
+        <div className="toast" role="status" aria-live="polite">
+          <span className="toast-dot" />
+          {toast.message}
+        </div>
+      )}
+    </div>
+  );
+}
