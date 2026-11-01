@@ -4,7 +4,8 @@
 Quiero realizar una aplicación para realizar una planificación semanal de comidas. El framework a usar será Next.js y Supabase. 
 La aplicación podrá generar una semana de comidas en base a los datos datos a continuación. Se podrán cambiar la planificación durante la semana para adecuarse a compras, temporalidad de comidas (en verano o en invierno no apetecen tanto unas comidas u otras), así como cambios al paso que puedan surgir, imprevistos, comida muy repetida cada semana, otros.
 
-
+Se tiene que poder elegir repetir la misma comida en la misma semana por temas logísticos, sobras de un plato, etc. Repetir comidas entre semanas desgasta, pero comer para reutilizar es necesario de vez en cuando, sobre todo si se hace comida en cantidad.
+También se tiene que poder editar la lista de platos, así como añadir nuevos, cambiar sus ingredientes que ahora mismo aparecen hardcodeados.
 
 # Alimentos
 

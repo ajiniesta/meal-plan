@@ -1,8 +1,15 @@
+import {
+  EMPTY_RECIPE_BOOK,
+  normalizeRecipeBook,
+  type RecipeBook,
+} from "./recipe-book";
 import type { SeasonMode, WeekPlan } from "./types";
 import { getOrCreateUser, getSupabaseClient } from "./supabase";
 
 const LOCAL_KEY = "mesa.week-plans.v1";
 const TABLE = "weekly_plans";
+const RECIPE_LOCAL_KEY = "mesa.recipe-book.v1";
+const RECIPE_TABLE = "recipe_books";
 
 export type StorageMode = "local" | "cloud";
 
@@ -13,6 +20,17 @@ export interface LoadPlansResult {
 }
 
 export interface SavePlanResult {
+  mode: StorageMode;
+  error?: string;
+}
+
+export interface LoadRecipeBookResult {
+  book: RecipeBook;
+  mode: StorageMode;
+  error?: string;
+}
+
+export interface SaveRecipeBookResult {
   mode: StorageMode;
   error?: string;
 }
@@ -30,6 +48,15 @@ function isSeasonMode(value: string): value is SeasonMode {
 }
 
 function friendlyStorageError(message: string): string {
+  if (
+    /recipe_books/i.test(message) &&
+    (/does not exist/i.test(message) ||
+      /could not find the table/i.test(message) ||
+      /schema cache/i.test(message))
+  ) {
+    return "Falta la tabla recipe_books. Ejecuta supabase/schema.sql en el SQL Editor de Supabase.";
+  }
+
   if (
     /relation .*weekly_plans.*does not exist/i.test(message) ||
     /could not find the table/i.test(message) ||
@@ -270,4 +297,126 @@ export async function deletePlan(weekStart: string): Promise<SavePlanResult> {
 
 export function getLocalPlans(): WeekPlan[] {
   return readLocalPlans();
+}
+
+function readLocalRecipeBook(): RecipeBook {
+  if (typeof window === "undefined") return EMPTY_RECIPE_BOOK;
+
+  try {
+    const raw = window.localStorage.getItem(RECIPE_LOCAL_KEY);
+    if (!raw) return EMPTY_RECIPE_BOOK;
+    return normalizeRecipeBook(JSON.parse(raw));
+  } catch {
+    return EMPTY_RECIPE_BOOK;
+  }
+}
+
+function writeLocalRecipeBook(book: RecipeBook): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(RECIPE_LOCAL_KEY, JSON.stringify(book));
+  } catch {
+    // El modo local puede fallar si el navegador bloquea el almacenamiento.
+  }
+}
+
+function isNewer(left: string, right: string): boolean {
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) return left > right;
+  return leftTime > rightTime;
+}
+
+function bookToRow(book: RecipeBook, userId: string) {
+  return {
+    user_id: userId,
+    data: {
+      custom: book.custom,
+      overrides: book.overrides,
+      hiddenIds: book.hiddenIds,
+    },
+    updated_at: book.updatedAt,
+  };
+}
+
+export async function loadRecipeBook(): Promise<LoadRecipeBookResult> {
+  const local = readLocalRecipeBook();
+  const client = getSupabaseClient();
+
+  if (!client) {
+    return { book: local, mode: "local" };
+  }
+
+  try {
+    const user = await withTimeout(getOrCreateUser(client));
+    const { data, error } = await withTimeout(
+      client
+        .from(RECIPE_TABLE)
+        .select("data, updated_at")
+        .eq("user_id", user.id)
+        .maybeSingle(),
+    );
+
+    if (error) throw new Error(error.message);
+
+    const row = data as { data: unknown; updated_at: string } | null;
+    const remote = row
+      ? normalizeRecipeBook({
+          ...(row.data && typeof row.data === "object" ? row.data : {}),
+          updatedAt: row.updated_at,
+        })
+      : null;
+
+    let book = local;
+    if (remote && isNewer(remote.updatedAt, local.updatedAt)) book = remote;
+
+    if (isNewer(book.updatedAt, remote?.updatedAt ?? EMPTY_RECIPE_BOOK.updatedAt)) {
+      const { error: upsertError } = await withTimeout(
+        client
+          .from(RECIPE_TABLE)
+          .upsert(bookToRow(book, user.id), { onConflict: "user_id" }),
+      );
+      if (upsertError) throw new Error(upsertError.message);
+    }
+
+    writeLocalRecipeBook(book);
+    return { book, mode: "cloud" };
+  } catch (error) {
+    return {
+      book: local,
+      mode: "local",
+      error:
+        error instanceof Error
+          ? friendlyStorageError(error.message)
+          : "No se pudo cargar el recetario desde Supabase.",
+    };
+  }
+}
+
+export async function saveRecipeBook(book: RecipeBook): Promise<SaveRecipeBookResult> {
+  writeLocalRecipeBook(book);
+
+  const client = getSupabaseClient();
+  if (!client) return { mode: "local" };
+
+  try {
+    const user = await withTimeout(getOrCreateUser(client));
+    const { error } = await withTimeout(
+      client
+        .from(RECIPE_TABLE)
+        .upsert(bookToRow(book, user.id), { onConflict: "user_id" }),
+    );
+
+    if (error) throw new Error(error.message);
+    return { mode: "cloud" };
+  } catch (error) {
+    return {
+      mode: "local",
+      error:
+        error instanceof Error
+          ? friendlyStorageError(error.message)
+          : "No se pudo guardar el recetario en Supabase.",
+    };
+  }
 }

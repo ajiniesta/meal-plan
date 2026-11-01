@@ -1,6 +1,14 @@
 "use client";
 
-import { Cloud, HardDrive, Leaf, Sparkles, Utensils, X } from "lucide-react";
+import {
+  BookOpen,
+  Cloud,
+  HardDrive,
+  Leaf,
+  Sparkles,
+  Utensils,
+  X,
+} from "lucide-react";
 import { useEffect } from "react";
 import { CATEGORIES, CATEGORY_ORDER } from "@/lib/recipes";
 import { TARGETS } from "@/lib/planner";
@@ -103,18 +111,34 @@ export function InfoModal({ open, mode, syncError, onClose }: InfoModalProps) {
 
           <section className="info-section">
             <div className="info-section-title">
+              <BookOpen size={17} />
+              <h3>Tu recetario y las sobras</h3>
+            </div>
+            <p>
+              Abre cualquier plato y entra en la pestaña <strong>Repetir</strong> para
+              reutilizar una comida de la semana, por ejemplo para sobras. Los platos
+              repetidos comparten ingredientes en la compra.
+            </p>
+            <p className="info-note">
+              En <strong>Recetario</strong> puedes añadir tus propias recetas, cambiar
+              ingredientes, temporada o categoría, y retirar los platos que no uses.
+            </p>
+          </section>
+
+          <section className="info-section">
+            <div className="info-section-title">
               {mode === "cloud" ? <Cloud size={17} /> : <HardDrive size={17} />}
               <h3>Tus datos</h3>
             </div>
             {mode === "cloud" ? (
               <p>
-                Tus semanas se guardan en Supabase y también en este dispositivo. Puedes
-                volver cuando quieras sin perder la planificación.
+                Tus semanas y tu recetario se guardan en Supabase y también en este
+                dispositivo. Puedes volver cuando quieras sin perder nada.
               </p>
             ) : (
               <p>
-                Ahora mismo la app guarda las semanas solo en este dispositivo. Si conectas
-                Supabase, se guardarán en la nube automáticamente.
+                Ahora mismo la app guarda las semanas y el recetario solo en este
+                dispositivo. Si conectas Supabase, se guardarán en la nube automáticamente.
               </p>
             )}
             {syncError && (

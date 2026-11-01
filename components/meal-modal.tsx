@@ -5,6 +5,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Repeat2,
   Search,
   Shuffle,
   Sparkles,
@@ -14,9 +15,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CATEGORIES,
   FISH_LABELS,
-  RECIPES,
   SEASON_LABELS,
-  getRecipe,
+  findRecipe,
 } from "@/lib/recipes";
 import { getSeasonContext } from "@/lib/dates";
 import {
@@ -32,6 +32,7 @@ interface MealModalProps {
   mealKey: MealKey | null;
   plan: WeekPlan | null;
   plans: WeekPlan[];
+  recipes: Recipe[];
   seasonMode: SeasonMode;
   onClose: () => void;
   onSelect: (mealKey: MealKey, recipeId: string) => void;
@@ -39,7 +40,7 @@ interface MealModalProps {
   onSuggest: (mealKey: MealKey) => void;
 }
 
-type Tab = "alternativas" | "intercambiar";
+type Tab = "alternativas" | "repetir" | "intercambiar";
 type Scope = "same" | "all";
 
 export function MealModal({
@@ -47,6 +48,7 @@ export function MealModal({
   mealKey,
   plan,
   plans,
+  recipes,
   seasonMode,
   onClose,
   onSelect,
@@ -57,7 +59,8 @@ export function MealModal({
   const [scope, setScope] = useState<Scope>("same");
   const [search, setSearch] = useState("");
 
-  const currentRecipe = plan && mealKey ? getRecipe(plan.meals[mealKey]) : undefined;
+  const currentRecipe =
+    plan && mealKey ? findRecipe(recipes, plan.meals[mealKey]) : undefined;
 
   useEffect(() => {
     if (!open) return;
@@ -84,33 +87,44 @@ export function MealModal({
 
   const mealType = mealKey?.endsWith("-comida") ? "comida" : "cena";
 
+  const usedCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    if (!plan || !mealKey) return counts;
+
+    for (const [key, recipeId] of Object.entries(plan.meals)) {
+      if (key === mealKey || !recipeId) continue;
+      counts.set(recipeId, (counts.get(recipeId) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [plan, mealKey]);
+
   const alternatives = useMemo(() => {
     if (!plan || !mealKey) return [];
 
-    const used = new Set(
-      Object.entries(plan.meals)
-        .filter(([key]) => key !== mealKey)
-        .map(([, recipeId]) => recipeId),
-    );
     const recent = getRecentRecipeIds(plans, plan.weekStart);
     const season = getSeasonContext(plan.weekStart, seasonMode);
     const normalizedSearch = search.trim().toLocaleLowerCase("es");
 
-    return RECIPES.filter((recipe) => {
-      if (recipe.id === currentRecipe?.id) return false;
-      if (!recipe.mealSlots.includes(mealType)) return false;
-      if (used.has(recipe.id)) return false;
-      if (scope === "same" && currentRecipe && recipe.category !== currentRecipe.category) {
-        return false;
-      }
-      if (!normalizedSearch) return true;
+    return recipes
+      .filter((recipe) => {
+        if (recipe.id === currentRecipe?.id) return false;
+        if (!recipe.mealSlots.includes(mealType)) return false;
+        if (scope === "same" && currentRecipe && recipe.category !== currentRecipe.category) {
+          return false;
+        }
+        if (!normalizedSearch) return true;
 
-      const haystack = [recipe.name, ...recipe.ingredients.map((item) => item.name)]
-        .join(" ")
-        .toLocaleLowerCase("es");
-      return haystack.includes(normalizedSearch);
-    })
+        const haystack = [recipe.name, ...recipe.ingredients.map((item) => item.name)]
+          .join(" ")
+          .toLocaleLowerCase("es");
+        return haystack.includes(normalizedSearch);
+      })
       .sort((left, right) => {
+        const leftUsed = usedCounts.has(left.id) ? 1 : 0;
+        const rightUsed = usedCounts.has(right.id) ? 1 : 0;
+        if (leftUsed !== rightUsed) return leftUsed - rightUsed;
+
         const leftKind = currentRecipe?.fishKind && left.fishKind === currentRecipe.fishKind ? 0 : 1;
         const rightKind = currentRecipe?.fishKind && right.fishKind === currentRecipe.fishKind ? 0 : 1;
         if (leftKind !== rightKind) return leftKind - rightKind;
@@ -125,7 +139,50 @@ export function MealModal({
 
         return left.name.localeCompare(right.name, "es");
       });
-  }, [plan, mealKey, plans, search, scope, currentRecipe, mealType, seasonMode]);
+  }, [
+    plan,
+    mealKey,
+    plans,
+    recipes,
+    search,
+    scope,
+    currentRecipe,
+    mealType,
+    seasonMode,
+    usedCounts,
+  ]);
+
+  const repeatCandidates = useMemo(() => {
+    if (!plan || !mealKey) return [];
+
+    const grouped = new Map<
+      string,
+      { recipe: Recipe; count: number; slots: string[] }
+    >();
+
+    for (const key of ALL_MEAL_KEYS) {
+      if (key === mealKey) continue;
+      const recipe = findRecipe(recipes, plan.meals[key]);
+      if (!recipe) continue;
+
+      const [dayId, slotType] = key.split("-");
+      const day = DAYS.find((item) => item.id === dayId);
+      const entry = grouped.get(recipe.id) ?? {
+        recipe,
+        count: 0,
+        slots: [],
+      };
+      entry.count += 1;
+      entry.slots.push(`${day?.short ?? dayId} ${slotType}`);
+      grouped.set(recipe.id, entry);
+    }
+
+    return [...grouped.values()].sort(
+      (left, right) =>
+        right.count - left.count ||
+        left.recipe.name.localeCompare(right.recipe.name, "es"),
+    );
+  }, [plan, mealKey, recipes]);
 
   if (!open || !mealKey || !plan) return null;
 
@@ -237,6 +294,16 @@ export function MealModal({
             <button
               type="button"
               role="tab"
+              aria-selected={tab === "repetir"}
+              className={tab === "repetir" ? "active" : ""}
+              onClick={() => setTab("repetir")}
+            >
+              <Repeat2 size={15} />
+              Repetir
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={tab === "intercambiar"}
               className={tab === "intercambiar" ? "active" : ""}
               onClick={() => setTab("intercambiar")}
@@ -292,9 +359,10 @@ export function MealModal({
                 <div className="alternatives-grid">
                   {alternatives.map((recipe) => {
                     const meta = CATEGORIES[recipe.category];
+                    const used = usedCounts.get(recipe.id) ?? 0;
                     return (
                       <button
-                        className="alternative-card"
+                        className={`alternative-card ${used > 0 ? "is-used" : ""}`}
                         type="button"
                         key={recipe.id}
                         onClick={() => handleSelect(recipe)}
@@ -322,6 +390,14 @@ export function MealModal({
                             {recipe.season !== "todo" ? ` · ${SEASON_LABELS[recipe.season]}` : ""}
                           </span>
                         </span>
+                        {used > 0 && (
+                          <span
+                            className="alternative-used"
+                            title={`Ya está en la semana (${used} ${used === 1 ? "vez" : "veces"})`}
+                          >
+                            Repetir
+                          </span>
+                        )}
                         <ChevronRight size={15} className="alternative-chevron" />
                       </button>
                     );
@@ -332,6 +408,64 @@ export function MealModal({
                   <Search size={22} />
                   <strong>No hay platos con ese filtro</strong>
                   <p>Prueba a buscar otra cosa o cambia a “Todos”.</p>
+                </div>
+              )}
+            </>
+          ) : tab === "repetir" ? (
+            <>
+              <div className="repeat-intro">
+                <span className="swap-icon">
+                  <Repeat2 size={18} />
+                </span>
+                <div>
+                  <strong>Repite un plato de esta semana</strong>
+                  <p>
+                    Perfecto para sobras o para repetir algo que os gusta. La compra no se
+                    duplica: los ingredientes del plato ya están en la lista.
+                  </p>
+                </div>
+              </div>
+
+              {repeatCandidates.length > 0 ? (
+                <div className="repeat-list">
+                  {repeatCandidates.map(({ recipe, count, slots }) => {
+                    const meta = CATEGORIES[recipe.category];
+                    const visibleSlots = slots.slice(0, 3).join(", ");
+                    return (
+                      <button
+                        className="alternative-card"
+                        type="button"
+                        key={recipe.id}
+                        onClick={() => handleSelect(recipe)}
+                      >
+                        <span
+                          className="alternative-emoji"
+                          style={{ background: meta.soft, color: meta.color }}
+                          aria-hidden="true"
+                        >
+                          {recipe.emoji}
+                        </span>
+                        <span className="alternative-copy">
+                          <strong>{recipe.name}</strong>
+                          <span>
+                            {count} {count === 1 ? "vez" : "veces"} esta semana ·{" "}
+                            {visibleSlots}
+                            {slots.length > 3 ? "…" : ""}
+                          </span>
+                        </span>
+                        <span className="repeat-action">
+                          Repetir
+                          <ChevronRight size={13} />
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="modal-empty">
+                  <Repeat2 size={22} />
+                  <strong>Todavía no hay platos que repetir</strong>
+                  <p>Cuando la semana tenga platos, podrás reutilizarlos aquí.</p>
                 </div>
               )}
             </>
@@ -352,7 +486,7 @@ export function MealModal({
 
               <div className="swap-grid">
                 {ALL_MEAL_KEYS.map((targetKey) => {
-                  const targetRecipe = getRecipe(plan.meals[targetKey]);
+                  const targetRecipe = findRecipe(recipes, plan.meals[targetKey]);
                   const [dayId, targetType] = targetKey.split("-");
                   const day = DAYS.find((item) => item.id === dayId);
                   const isCurrent = targetKey === mealKey;

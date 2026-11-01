@@ -48,6 +48,42 @@ create policy "Cada persona borra sus semanas"
   for delete
   using (auth.uid() = user_id);
 
+-- Recetario personal: recetas propias, ediciones de recetas base y recetas retiradas.
+create table if not exists public.recipe_books (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  data jsonb not null default '{"custom":[],"overrides":{},"hiddenIds":[]}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.recipe_books enable row level security;
+
+grant select, insert, update, delete on public.recipe_books to authenticated;
+
+drop policy if exists "Cada persona lee su recetario" on public.recipe_books;
+create policy "Cada persona lee su recetario"
+  on public.recipe_books
+  for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "Cada persona crea su recetario" on public.recipe_books;
+create policy "Cada persona crea su recetario"
+  on public.recipe_books
+  for insert
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Cada persona actualiza su recetario" on public.recipe_books;
+create policy "Cada persona actualiza su recetario"
+  on public.recipe_books
+  for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Cada persona borra su recetario" on public.recipe_books;
+create policy "Cada persona borra su recetario"
+  on public.recipe_books
+  for delete
+  using (auth.uid() = user_id);
+
 -- Mantiene updated_at al día si se modifica una fila desde el panel de Supabase.
 create or replace function public.touch_updated_at()
 returns trigger
@@ -62,5 +98,11 @@ $$;
 drop trigger if exists weekly_plans_touch_updated_at on public.weekly_plans;
 create trigger weekly_plans_touch_updated_at
   before update on public.weekly_plans
+  for each row
+  execute function public.touch_updated_at();
+
+drop trigger if exists recipe_books_touch_updated_at on public.recipe_books;
+create trigger recipe_books_touch_updated_at
+  before update on public.recipe_books
   for each row
   execute function public.touch_updated_at();

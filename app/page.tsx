@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BookOpen,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -22,6 +23,7 @@ import { ConfirmDialog } from "@/components/confirm-dialog";
 import { InfoModal } from "@/components/info-modal";
 import { MealCard } from "@/components/meal-card";
 import { MealModal } from "@/components/meal-modal";
+import { RecipeManager } from "@/components/recipe-manager";
 import { ShoppingList } from "@/components/shopping-list";
 import {
   DAYS,
@@ -44,10 +46,21 @@ import {
   getRecentRecipeIds,
   pickRecipeForSlot,
 } from "@/lib/planner";
-import { getRecipe } from "@/lib/recipes";
-import { loadPlans, savePlan, type StorageMode } from "@/lib/storage";
+import { RECIPES_BY_ID, findRecipe } from "@/lib/recipes";
+import {
+  EMPTY_RECIPE_BOOK,
+  buildRecipeCatalog,
+  type RecipeBook,
+} from "@/lib/recipe-book";
+import {
+  loadPlans,
+  loadRecipeBook,
+  savePlan,
+  saveRecipeBook,
+  type StorageMode,
+} from "@/lib/storage";
 import { isSupabaseConfigured } from "@/lib/supabase";
-import type { MealKey, SeasonMode, WeekPlan } from "@/lib/types";
+import type { MealKey, Recipe, SeasonMode, WeekPlan } from "@/lib/types";
 
 interface ToastState {
   id: number;
@@ -65,8 +78,13 @@ export default function HomePage() {
   const [modalMeal, setModalMeal] = useState<MealKey | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [managerOpen, setManagerOpen] = useState(false);
+  const [recipeBook, setRecipeBook] = useState<RecipeBook>(EMPTY_RECIPE_BOOK);
+  const [recipeError, setRecipeError] = useState<string | undefined>();
   const [toast, setToast] = useState<ToastState | null>(null);
   const warnedRef = useRef(false);
+
+  const recipes = useMemo(() => buildRecipeCatalog(recipeBook), [recipeBook]);
 
   const notify = useCallback((message: string) => {
     setToast({ id: Date.now(), message });
@@ -75,6 +93,7 @@ export default function HomePage() {
   const closeMealModal = useCallback(() => setModalMeal(null), []);
   const closeConfirm = useCallback(() => setConfirmOpen(false), []);
   const closeInfo = useCallback(() => setInfoOpen(false), []);
+  const closeManager = useCallback(() => setManagerOpen(false), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,38 +101,43 @@ export default function HomePage() {
     setWeekStart(currentWeek);
     setTodayISO(toISODate(new Date()));
 
-    loadPlans()
-      .then((result) => {
-        if (cancelled) return;
+    (async () => {
+      // En serie para reutilizar la misma sesión anónima de Supabase.
+      const result = await loadPlans();
+      const bookResult = await loadRecipeBook();
+      if (cancelled) return;
 
-        let nextPlans = result.plans;
-        let currentPlan = nextPlans.find((plan) => plan.weekStart === currentWeek);
+      const catalog = buildRecipeCatalog(bookResult.book);
+      setRecipeBook(bookResult.book);
+      if (bookResult.error) setRecipeError(bookResult.error);
 
-        if (!currentPlan) {
-          currentPlan = generateWeekPlan(currentWeek, "auto", nextPlans);
-          nextPlans = [...nextPlans, currentPlan].sort((left, right) =>
-            left.weekStart.localeCompare(right.weekStart),
-          );
-          void savePlan(currentPlan).then((saveResult) => {
-            if (cancelled) return;
-            setMode(saveResult.mode);
-            if (saveResult.error) setSyncError(saveResult.error);
-          });
-        }
+      let nextPlans = result.plans;
+      let currentPlan = nextPlans.find((plan) => plan.weekStart === currentWeek);
 
-        setPlans(nextPlans);
-        setMode(result.mode);
-        setSelectedSeason(currentPlan.seasonMode);
-        if (result.error) setSyncError(result.error);
-        setLoading(false);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        setSyncError(
-          error instanceof Error ? error.message : "No se pudo cargar la planificación.",
+      if (!currentPlan) {
+        currentPlan = generateWeekPlan(currentWeek, "auto", nextPlans, catalog);
+        nextPlans = [...nextPlans, currentPlan].sort((left, right) =>
+          left.weekStart.localeCompare(right.weekStart),
         );
-        setLoading(false);
-      });
+        void savePlan(currentPlan).then((saveResult) => {
+          if (cancelled) return;
+          setMode(saveResult.mode);
+          if (saveResult.error) setSyncError(saveResult.error);
+        });
+      }
+
+      setPlans(nextPlans);
+      setMode(result.mode);
+      setSelectedSeason(currentPlan.seasonMode);
+      if (result.error) setSyncError(result.error);
+      setLoading(false);
+    })().catch((error: unknown) => {
+      if (cancelled) return;
+      setSyncError(
+        error instanceof Error ? error.message : "No se pudo cargar la planificación.",
+      );
+      setLoading(false);
+    });
 
     return () => {
       cancelled = true;
@@ -138,9 +162,21 @@ export default function HomePage() {
   );
 
   const stats = useMemo(
-    () => (currentPlan ? getPlanStats(currentPlan) : null),
-    [currentPlan],
+    () => (currentPlan ? getPlanStats(currentPlan, recipes) : null),
+    [currentPlan, recipes],
   );
+
+  const recipeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    if (!currentPlan) return counts;
+
+    for (const recipeId of Object.values(currentPlan.meals)) {
+      if (!recipeId) continue;
+      counts.set(recipeId, (counts.get(recipeId) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [currentPlan]);
 
   const uniqueDishes = useMemo(
     () =>
@@ -161,12 +197,12 @@ export default function HomePage() {
   const shoppingCount = useMemo(
     () =>
       currentPlan
-        ? buildShoppingList(currentPlan).reduce(
+        ? buildShoppingList(currentPlan, recipes).reduce(
             (sum, group) => sum + group.items.length,
             0,
           )
         : 0,
-    [currentPlan],
+    [currentPlan, recipes],
   );
 
   const persist = useCallback(
@@ -201,11 +237,11 @@ export default function HomePage() {
     (targetWeek = weekStart, seasonMode = selectedSeason) => {
       if (!targetWeek) return;
       const history = plans.filter((plan) => plan.weekStart !== targetWeek);
-      const next = generateWeekPlan(targetWeek, seasonMode, history);
+      const next = generateWeekPlan(targetWeek, seasonMode, history, recipes);
       persist(next);
       notify("Semana generada con equilibrio y temporada");
     },
-    [weekStart, selectedSeason, plans, persist, notify],
+    [weekStart, selectedSeason, plans, recipes, persist, notify],
   );
 
   const requestGenerate = () => {
@@ -249,7 +285,7 @@ export default function HomePage() {
 
   const handleQuickSwap = (mealKey: MealKey) => {
     if (!currentPlan) return;
-    const currentRecipe = getRecipe(currentPlan.meals[mealKey]);
+    const currentRecipe = findRecipe(recipes, currentPlan.meals[mealKey]);
     if (!currentRecipe) return;
 
     const usedIds = new Set(
@@ -274,6 +310,7 @@ export default function HomePage() {
       recentIds,
       climate: season.climate,
       excludeId: currentRecipe.id,
+      recipes,
     });
 
     if (!replacement) {
@@ -290,11 +327,14 @@ export default function HomePage() {
 
   const handleSelect = (mealKey: MealKey, recipeId: string) => {
     if (!currentPlan) return;
+    const repeated = Object.entries(currentPlan.meals).some(
+      ([key, id]) => key !== mealKey && id === recipeId,
+    );
     persist({
       ...currentPlan,
       meals: { ...currentPlan.meals, [mealKey]: recipeId },
     });
-    notify("Plato actualizado");
+    notify(repeated ? "Plato repetido en la semana" : "Plato actualizado");
   };
 
   const handleSwap = (from: MealKey, to: MealKey) => {
@@ -305,6 +345,93 @@ export default function HomePage() {
     meals[to] = fromRecipe;
     persist({ ...currentPlan, meals });
     notify("Platos intercambiados");
+  };
+
+  const persistBook = useCallback(
+    (book: RecipeBook) => {
+      const stamped: RecipeBook = {
+        ...book,
+        updatedAt: new Date().toISOString(),
+      };
+      setRecipeBook(stamped);
+
+      void saveRecipeBook(stamped).then((result) => {
+        if (result.error) {
+          setRecipeError(result.error);
+          notify("Recetario guardado en este dispositivo. No se pudo sincronizar.");
+        } else {
+          setRecipeError(undefined);
+        }
+      });
+    },
+    [notify],
+  );
+
+  const handleSaveRecipe = (recipe: Recipe) => {
+    if (RECIPES_BY_ID.has(recipe.id)) {
+      persistBook({
+        ...recipeBook,
+        overrides: { ...recipeBook.overrides, [recipe.id]: recipe },
+      });
+    } else {
+      const exists = recipeBook.custom.some((item) => item.id === recipe.id);
+      persistBook({
+        ...recipeBook,
+        custom: exists
+          ? recipeBook.custom.map((item) =>
+              item.id === recipe.id ? recipe : item,
+            )
+          : [...recipeBook.custom, recipe],
+      });
+    }
+
+    notify("Receta guardada");
+  };
+
+  const handleDeleteRecipe = (id: string) => {
+    const isBase = RECIPES_BY_ID.has(id);
+    const overrides = { ...recipeBook.overrides };
+    delete overrides[id];
+
+    persistBook({
+      ...recipeBook,
+      custom: recipeBook.custom.filter((recipe) => recipe.id !== id),
+      overrides,
+      hiddenIds: isBase
+        ? [...new Set([...recipeBook.hiddenIds, id])]
+        : recipeBook.hiddenIds,
+    });
+
+    let removed = 0;
+    for (const plan of plans) {
+      const keys = Object.entries(plan.meals)
+        .filter(([, recipeId]) => recipeId === id)
+        .map(([key]) => key);
+      if (keys.length === 0) continue;
+
+      removed += keys.length;
+      const meals = { ...plan.meals };
+      for (const key of keys) delete meals[key];
+      persist({ ...plan, meals });
+    }
+
+    notify(
+      removed > 0
+        ? `Plato eliminado y retirado de ${removed} ${removed === 1 ? "hueco" : "huecos"}`
+        : "Plato eliminado del recetario",
+    );
+  };
+
+  const handleRestoreRecipe = (id: string) => {
+    const overrides = { ...recipeBook.overrides };
+    delete overrides[id];
+    persistBook({ ...recipeBook, overrides });
+    notify("Plato original restaurado");
+  };
+
+  const handleResetBase = () => {
+    persistBook({ ...recipeBook, overrides: {}, hiddenIds: [] });
+    notify("Platos base restaurados");
   };
 
   const scrollToShopping = () => {
@@ -403,6 +530,14 @@ export default function HomePage() {
                 <ShoppingBasket size={17} />
                 Lista de la compra
                 {shoppingCount > 0 && <span className="btn-count">{shoppingCount}</span>}
+              </button>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => setManagerOpen(true)}
+              >
+                <BookOpen size={17} />
+                Recetario
               </button>
             </div>
           </div>
@@ -530,6 +665,8 @@ export default function HomePage() {
                     {DAYS.map((day, index) => {
                       const date = addDaysISO(weekStart, index);
                       const isToday = date === todayISO;
+                      const lunchKey = `${day.id}-comida` as MealKey;
+                      const dinnerKey = `${day.id}-cena` as MealKey;
 
                       return (
                         <div className={`day-column ${isToday ? "today" : ""}`} key={day.id}>
@@ -538,18 +675,24 @@ export default function HomePage() {
                             <span className="day-date">{formatDayNumber(date)}</span>
                           </div>
                           <MealCard
-                            mealKey={`${day.id}-comida`}
+                            mealKey={lunchKey}
                             mealType="comida"
-                            recipe={getPlanRecipe(currentPlan, `${day.id}-comida`)}
-                            onOpen={() => setModalMeal(`${day.id}-comida`)}
-                            onQuickSwap={() => handleQuickSwap(`${day.id}-comida`)}
+                            recipe={getPlanRecipe(currentPlan, lunchKey, recipes)}
+                            repeatCount={
+                              recipeCounts.get(currentPlan.meals[lunchKey]) ?? 0
+                            }
+                            onOpen={() => setModalMeal(lunchKey)}
+                            onQuickSwap={() => handleQuickSwap(lunchKey)}
                           />
                           <MealCard
-                            mealKey={`${day.id}-cena`}
+                            mealKey={dinnerKey}
                             mealType="cena"
-                            recipe={getPlanRecipe(currentPlan, `${day.id}-cena`)}
-                            onOpen={() => setModalMeal(`${day.id}-cena`)}
-                            onQuickSwap={() => handleQuickSwap(`${day.id}-cena`)}
+                            recipe={getPlanRecipe(currentPlan, dinnerKey, recipes)}
+                            repeatCount={
+                              recipeCounts.get(currentPlan.meals[dinnerKey]) ?? 0
+                            }
+                            onOpen={() => setModalMeal(dinnerKey)}
+                            onQuickSwap={() => handleQuickSwap(dinnerKey)}
                           />
                         </div>
                       );
@@ -564,7 +707,7 @@ export default function HomePage() {
                 <div className="planner-foot">
                   <span>
                     <Sparkles size={13} />
-                    {season.label} · sin repetir en 3 semanas
+                    {season.label} · variedad entre semanas
                   </span>
                   <span className={stats?.balanced ? "foot-ok" : "foot-off"}>
                     {stats?.balanced ? "Reparto perfecto" : "Reparto personalizado"}
@@ -589,8 +732,12 @@ export default function HomePage() {
           </section>
 
           <aside className="sidebar" id="shopping">
-            <BalanceCard plan={currentPlan} onRebalance={requestGenerate} />
-            <ShoppingList plan={currentPlan} onToast={notify} />
+            <BalanceCard
+              plan={currentPlan}
+              recipes={recipes}
+              onRebalance={requestGenerate}
+            />
+            <ShoppingList plan={currentPlan} recipes={recipes} onToast={notify} />
             <div className="side-tip">
               <span className="side-tip-icon">
                 <Leaf size={17} />
@@ -598,8 +745,8 @@ export default function HomePage() {
               <div>
                 <strong>Cambia el plan, no la calma</strong>
                 <p>
-                  Toca cualquier plato para cambiarlo, buscar otra opción o moverlo a otro
-                  día de la semana.
+                  Toca cualquier plato para cambiarlo, repetirlo por sobras o moverlo a otro
+                  día. En el recetario puedes editar ingredientes y añadir tus propias recetas.
                 </p>
               </div>
             </div>
@@ -617,11 +764,26 @@ export default function HomePage() {
         mealKey={modalMeal}
         plan={currentPlan ?? null}
         plans={plans}
+        recipes={recipes}
         seasonMode={currentPlan?.seasonMode ?? selectedSeason}
         onClose={closeMealModal}
         onSelect={handleSelect}
         onSwap={handleSwap}
         onSuggest={handleQuickSwap}
+      />
+
+      <RecipeManager
+        open={managerOpen}
+        recipes={recipes}
+        book={recipeBook}
+        plans={plans}
+        mode={mode}
+        error={recipeError}
+        onClose={closeManager}
+        onSave={handleSaveRecipe}
+        onDelete={handleDeleteRecipe}
+        onRestore={handleRestoreRecipe}
+        onResetBase={handleResetBase}
       />
 
       <ConfirmDialog

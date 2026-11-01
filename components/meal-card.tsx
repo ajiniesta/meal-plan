@@ -9,6 +9,7 @@ interface MealCardProps {
   mealKey: MealKey;
   mealType: MealType;
   recipe?: Recipe;
+  repeatCount?: number;
   onOpen: () => void;
   onQuickSwap: () => void;
 }
@@ -17,6 +18,7 @@ export function MealCard({
   mealKey,
   mealType,
   recipe,
+  repeatCount = 0,
   onOpen,
   onQuickSwap,
 }: MealCardProps) {
@@ -46,10 +48,20 @@ export function MealCard({
         className="meal-card-main"
         onClick={onOpen}
         type="button"
-        aria-label={`${recipe.name}. Abrir opciones para ${mealKey}`}
+        aria-label={`${recipe.name}${repeatCount > 1 ? `, repetido ${repeatCount} veces esta semana` : ""}. Abrir opciones para ${mealKey}`}
       >
         <span className="meal-card-top">
-          <span className="meal-type">{mealType === "comida" ? "Comida" : "Cena"}</span>
+          <span className="meal-type">
+            {mealType === "comida" ? "Comida" : "Cena"}
+            {repeatCount > 1 && (
+              <span
+                className="meal-repeat"
+                title={`Este plato se repite ${repeatCount} veces esta semana`}
+              >
+                ×{repeatCount}
+              </span>
+            )}
+          </span>
           <span className="meal-emoji" aria-hidden="true">
             {recipe.emoji}
           </span>

@@ -15,11 +15,13 @@ Aplicación para generar y ajustar una semana de 7 comidas y 7 cenas. Está cons
   - 1 plato de “otros” para completar los 14 huecos
 - Reparto pensado para el día a día: legumbres, pasta y arroz en la comida; cenas más ligeras.
 - Catálogo inicial de más de 90 recetas, con ingredientes, temporada y tipo de pescado.
+- Recetario editable: añade recetas propias, cambia nombre, categoría, temporada, huecos e ingredientes, o retira platos base.
 - Cambio de plato individual, sugerencia aleatoria, búsqueda de alternativas e intercambio entre días.
-- Lista de la compra agregada por secciones, con ingredientes repetidos contados y opción de copiarla.
+- Repetición de platos dentro de la misma semana, pensada para sobras o para repetir algo que gusta.
+- Lista de la compra agregada por secciones, con ingredientes compartidos contados una sola vez y opción de copiarla.
 - Temporada automática según el mes, o forzada a verano/invierno.
-- Evita repetir platos de las últimas tres semanas.
-- Persistencia en Supabase mediante sesión anónima, con RLS por usuario.
+- Evita repetir platos de las últimas tres semanas al generar, sin impedir repeticiones manuales.
+- Persistencia en Supabase mediante sesión anónima, con RLS por usuario, para semanas y recetario.
 - Modo local automático si no hay variables de Supabase o falla la conexión.
 
 ## Arrancar en local
@@ -31,7 +33,7 @@ npm install
 npm run dev
 ```
 
-Abre <http://localhost:3000>. Sin configurar Supabase, la app funciona en modo local y guarda las semanas en `localStorage`.
+Abre <http://localhost:3000>. Sin configurar Supabase, la app funciona en modo local y guarda las semanas y el recetario en `localStorage`.
 
 Comandos disponibles:
 
@@ -58,7 +60,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=tu-anon-key
 
 5. Reinicia el servidor de desarrollo.
 
-La app guarda cada semana en la tabla `weekly_plans` y mantiene una copia local. Si Supabase falla, sigue funcionando en local y lo indica en la cabecera.
+La app guarda cada semana en la tabla `weekly_plans` y el recetario personal en `recipe_books`, manteniendo una copia local de ambos. Si Supabase falla, sigue funcionando en local y lo indica en la cabecera.
 
 > La sesión es anónima y vive en este navegador. Para compartir la planificación entre dispositivos habría que añadir autenticación con email o un enlace mágico; el esquema ya está preparado para asociar cada semana a `auth.uid()`.
 
@@ -71,20 +73,22 @@ app/
   globals.css         Sistema visual y responsive
 components/
   meal-card.tsx       Tarjeta de comida/cena
-  meal-modal.tsx      Cambiar, buscar e intercambiar platos
+  meal-modal.tsx      Cambiar, repetir, buscar e intercambiar platos
+  recipe-manager.tsx  Recetario editable y formulario de recetas
   balance-card.tsx    Reparto semanal y equilibrio
   shopping-list.tsx   Lista de la compra
   info-modal.tsx      Explicación de reglas y sincronización
   confirm-dialog.tsx  Confirmación de regeneración
 lib/
-  recipes.ts          Catálogo de recetas y metadatos
+  recipes.ts          Catálogo base de recetas y metadatos
+  recipe-book.ts      Recetas propias, ediciones y catálogo efectivo
   planner.ts          Generación, cuotas, estadísticas y compra
   dates.ts            Semanas, fechas y temporada
-  storage.ts          Persistencia local + Supabase
+  storage.ts          Persistencia local + Supabase (semanas y recetario)
   supabase.ts         Cliente y sesión anónima
   types.ts            Tipos compartidos
 supabase/
-  schema.sql          Tabla, índices, RLS y trigger
+  schema.sql          Tablas, índices, RLS y trigger
 ```
 
 ## Reglas de generación
@@ -94,7 +98,9 @@ La semana se construye a partir de dos plantillas que se barajan entre los días
 - **Comidas (7):** 2 carne, 1 pasta, 1 arroz, 2 legumbres y 1 pescado blanco.
 - **Cenas (7):** 1 carne, 1 pescado azul, 2 huevos, 2 verduras y 1 “otros”.
 
-El generador puntúa cada receta por temporada, si se ha usado en las últimas tres semanas y si encaja con el hueco. Los platos no se repiten dentro de la misma semana. Al cambiar un plato manualmente, el equilibrio puede variar; la tarjeta de equilibrio lo muestra en tiempo real.
+El generador puntúa cada receta por temporada, si se ha usado en las últimas tres semanas y si encaja con el hueco. Al generar, evita repetir platos dentro de la misma semana; si el recetario no tiene suficientes opciones, reutiliza las que haya. Después puedes repetir cualquier plato manualmente desde la pestaña **Repetir**. Al cambiar o repetir un plato, el equilibrio puede variar; la tarjeta de equilibrio lo muestra en tiempo real.
+
+Los platos repetidos cuentan para el equilibrio (son dos comidas), pero sus ingredientes aparecen una sola vez en la lista de la compra, pensando en sobras. Los datos locales se guardan en `mesa.week-plans.v1` y `mesa.recipe-book.v1`.
 
 ## Despliegue
 

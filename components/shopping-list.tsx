@@ -3,20 +3,29 @@
 import { Check, Copy, ShoppingBasket } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { buildShoppingList, buildShoppingListText } from "@/lib/planner";
-import type { WeekPlan } from "@/lib/types";
+import type { Recipe, WeekPlan } from "@/lib/types";
 
 interface ShoppingListProps {
   plan?: WeekPlan;
+  recipes: Recipe[];
   onToast: (message: string) => void;
 }
 
-export function ShoppingList({ plan, onToast }: ShoppingListProps) {
+export function ShoppingList({ plan, recipes, onToast }: ShoppingListProps) {
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  const groups = useMemo(() => (plan ? buildShoppingList(plan) : []), [plan]);
+  const groups = useMemo(
+    () => (plan ? buildShoppingList(plan, recipes) : []),
+    [plan, recipes],
+  );
   const total = useMemo(
     () => groups.reduce((sum, group) => sum + group.items.length, 0),
     [groups],
   );
+  const repeated = useMemo(() => {
+    if (!plan) return 0;
+    const ids = Object.values(plan.meals).filter(Boolean);
+    return ids.length - new Set(ids).size;
+  }, [plan]);
 
   useEffect(() => {
     setChecked(new Set());
@@ -34,7 +43,7 @@ export function ShoppingList({ plan, onToast }: ShoppingListProps) {
   const handleCopy = async () => {
     if (!plan) return;
     try {
-      await navigator.clipboard.writeText(buildShoppingListText(plan));
+      await navigator.clipboard.writeText(buildShoppingListText(plan, recipes));
       onToast("Lista copiada al portapapeles");
     } catch {
       onToast("No se pudo copiar la lista");
@@ -96,7 +105,7 @@ export function ShoppingList({ plan, onToast }: ShoppingListProps) {
                       {item.count > 1 && (
                         <span
                           className="shopping-count"
-                          title={`Aparece en ${item.count} platos`}
+                          title={`Se usa en ${item.count} platos distintos`}
                         >
                           ×{item.count}
                         </span>
@@ -112,8 +121,15 @@ export function ShoppingList({ plan, onToast }: ShoppingListProps) {
               Desliza dentro de la lista para ver el resto.
             </p>
           )}
+          {repeated > 0 && (
+            <p className="shopping-repeat-note">
+              {repeated} {repeated === 1 ? "plato repetido" : "platos repetidos"}: sus
+              ingredientes se cuentan una sola vez, pensando en sobras.
+            </p>
+          )}
           <p className="shopping-footnote">
-            Las cantidades se ajustan al hacer la compra. × indica en cuántos platos se usa.
+            Las cantidades se ajustan al hacer la compra. × indica en cuántos platos
+            distintos se usa.
           </p>
         </>
       )}

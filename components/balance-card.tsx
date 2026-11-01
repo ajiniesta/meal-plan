@@ -3,16 +3,18 @@
 import { CheckCircle2, Fish, RefreshCw, Sparkles } from "lucide-react";
 import { CATEGORIES, CATEGORY_ORDER } from "@/lib/recipes";
 import { TARGETS, getPlanStats } from "@/lib/planner";
-import type { WeekPlan } from "@/lib/types";
+import type { Recipe, WeekPlan } from "@/lib/types";
 
 interface BalanceCardProps {
   plan?: WeekPlan;
+  recipes: Recipe[];
   onRebalance: () => void;
 }
 
-export function BalanceCard({ plan, onRebalance }: BalanceCardProps) {
-  const stats = plan ? getPlanStats(plan) : null;
+export function BalanceCard({ plan, recipes, onRebalance }: BalanceCardProps) {
+  const stats = plan ? getPlanStats(plan, recipes) : null;
   const unique = plan ? new Set(Object.values(plan.meals).filter(Boolean)).size : 0;
+  const repeated = (stats?.total ?? 0) - unique;
   const fishOk = stats?.fish.blanco === 1 && stats?.fish.azul === 1;
 
   return (
@@ -88,7 +90,7 @@ export function BalanceCard({ plan, onRebalance }: BalanceCardProps) {
               ? "Aún no hay platos"
               : unique === stats?.total
                 ? `${unique} platos distintos`
-                : `${unique} platos · ${(stats?.total ?? 0) - unique} repetido`}
+                : `${unique} platos · ${repeated} repetido${repeated === 1 ? "" : "s"}`}
           </span>
         </div>
         {plan && (

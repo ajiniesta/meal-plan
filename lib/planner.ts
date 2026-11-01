@@ -1,5 +1,11 @@
 import { addDaysISO, getSeasonContext } from "./dates";
-import { CATEGORIES, CATEGORY_ORDER, INGREDIENT_SECTIONS, RECIPES, getRecipe } from "./recipes";
+import {
+  CATEGORIES,
+  CATEGORY_ORDER,
+  INGREDIENT_SECTIONS,
+  RECIPES,
+  findRecipe,
+} from "./recipes";
 import type {
   Category,
   DayId,
@@ -109,6 +115,7 @@ interface PickOptions {
   recentIds: Set<string>;
   climate: "verano" | "invierno" | "templado";
   excludeId?: string;
+  recipes?: Recipe[];
 }
 
 export function pickRecipeForSlot({
@@ -118,8 +125,9 @@ export function pickRecipeForSlot({
   recentIds,
   climate,
   excludeId,
+  recipes = RECIPES,
 }: PickOptions): Recipe | undefined {
-  const base = RECIPES.filter(
+  const base = recipes.filter(
     (recipe) =>
       recipe.category === requirement.category &&
       (!requirement.fishKind || recipe.fishKind === requirement.fishKind) &&
@@ -152,6 +160,7 @@ export function generateWeekPlan(
   weekStart: string,
   seasonMode: SeasonMode,
   historyPlans: WeekPlan[] = [],
+  recipes: Recipe[] = RECIPES,
 ): WeekPlan {
   const season = getSeasonContext(weekStart, seasonMode);
   const recentIds = getRecentRecipeIds(historyPlans, weekStart);
@@ -171,6 +180,7 @@ export function generateWeekPlan(
       usedIds,
       recentIds,
       climate: season.climate,
+      recipes,
     });
 
     if (lunch) {
@@ -184,6 +194,7 @@ export function generateWeekPlan(
       usedIds,
       recentIds,
       climate: season.climate,
+      recipes,
     });
 
     if (dinner) {
@@ -203,11 +214,15 @@ export function generateWeekPlan(
   };
 }
 
-export function getPlanRecipe(plan: WeekPlan, mealKey: MealKey): Recipe | undefined {
-  return getRecipe(plan.meals[mealKey]);
+export function getPlanRecipe(
+  plan: WeekPlan,
+  mealKey: MealKey,
+  recipes: Recipe[] = RECIPES,
+): Recipe | undefined {
+  return findRecipe(recipes, plan.meals[mealKey]);
 }
 
-export function getPlanStats(plan: WeekPlan): PlanStats {
+export function getPlanStats(plan: WeekPlan, recipes: Recipe[] = RECIPES): PlanStats {
   const byCategory = CATEGORY_ORDER.reduce(
     (accumulator, category) => {
       accumulator[category] = 0;
@@ -225,7 +240,7 @@ export function getPlanStats(plan: WeekPlan): PlanStats {
   let total = 0;
 
   for (const recipeId of Object.values(plan.meals)) {
-    const recipe = getRecipe(recipeId);
+    const recipe = findRecipe(recipes, recipeId);
     if (!recipe) continue;
     total += 1;
     byCategory[recipe.category] += 1;
@@ -248,6 +263,7 @@ export function getPlanAlternatives(
   plan: WeekPlan,
   mealKey: MealKey,
   recipe: Recipe,
+  recipes: Recipe[] = RECIPES,
 ): Recipe[] {
   const currentId = plan.meals[mealKey];
   const used = new Set(
@@ -256,7 +272,7 @@ export function getPlanAlternatives(
       .map(([, value]) => value),
   );
 
-  return RECIPES.filter(
+  return recipes.filter(
     (candidate) =>
       candidate.id !== currentId &&
       candidate.category === recipe.category &&
@@ -270,7 +286,10 @@ export function getPlanAlternatives(
   });
 }
 
-export function buildShoppingList(plan: WeekPlan): {
+export function buildShoppingList(
+  plan: WeekPlan,
+  recipes: Recipe[] = RECIPES,
+): {
   section: IngredientSection;
   label: string;
   items: { name: string; count: number; recipes: string[] }[];
@@ -281,7 +300,7 @@ export function buildShoppingList(plan: WeekPlan): {
   >();
 
   for (const recipeId of new Set(Object.values(plan.meals))) {
-    const recipe = getRecipe(recipeId);
+    const recipe = findRecipe(recipes, recipeId);
     if (!recipe) continue;
 
     for (const ingredient of recipe.ingredients) {
@@ -315,8 +334,11 @@ export function buildShoppingList(plan: WeekPlan): {
   })).filter((section) => section.items.length > 0);
 }
 
-export function buildShoppingListText(plan: WeekPlan): string {
-  const groups = buildShoppingList(plan);
+export function buildShoppingListText(
+  plan: WeekPlan,
+  recipes: Recipe[] = RECIPES,
+): string {
+  const groups = buildShoppingList(plan, recipes);
   const lines = ["Lista de la compra · Mesa", ""];
 
   for (const group of groups) {
@@ -333,6 +355,7 @@ export function buildShoppingListText(plan: WeekPlan): string {
 export function getCompatibleRecipesForSlot(
   mealKey: MealKey,
   plan: WeekPlan,
+  recipes: Recipe[] = RECIPES,
 ): Recipe[] {
   const mealType: MealType = mealKey.endsWith("-comida") ? "comida" : "cena";
   const used = new Set(
@@ -341,7 +364,7 @@ export function getCompatibleRecipesForSlot(
       .map(([, value]) => value),
   );
 
-  return RECIPES.filter(
+  return recipes.filter(
     (recipe) => recipe.mealSlots.includes(mealType) && !used.has(recipe.id),
   );
 }

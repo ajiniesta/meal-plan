@@ -1586,3 +1586,11 @@ export function getRecipe(id: string | undefined | null): Recipe | undefined {
   if (!id) return undefined;
   return RECIPES_BY_ID.get(id);
 }
+
+export function findRecipe(
+  recipes: Recipe[],
+  id: string | undefined | null,
+): Recipe | undefined {
+  if (!id) return undefined;
+  return recipes.find((recipe) => recipe.id === id);
+}
