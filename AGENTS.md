@@ -15,7 +15,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Single-page Next.js 16 App Router app. Page-level state and orchestration live in `app/page.tsx`; there are no API routes or server actions.
 - The browser talks to Supabase directly with the public anon key. Keep Supabase access client-side; only `NEXT_PUBLIC_*` env vars are available.
 - UI copy and code comments are in Spanish; identifiers and types are in English. Keep new user-facing text in Spanish.
-- Supabase is optional: without env vars, or when calls fail, persistence falls back to `localStorage` and the UI shows local mode.
+- With Supabase configured, real email/password accounts are required (`AuthScreen`); there is no anonymous sign-in. Without env vars, the app runs account-less in local mode.
+- After sign-in, persistence failures still fall back to per-account `localStorage` and the UI shows local mode.
 
 ## Commands
 
@@ -28,10 +29,11 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 - `lib/recipes.ts` (`RECIPES`, `getRecipe`) is only the **base** catalog.
 - The effective catalog is `buildRecipeCatalog(recipeBook)` in `lib/recipe-book.ts`: base recipes minus `hiddenIds`, with `overrides` applied, plus `custom`.
-- Planner functions and UI components accept an optional `recipes` argument/prop that defaults to `RECIPES`. Thread the effective catalog through when adding features: `findRecipe(catalog, id)`, `generateWeekPlan(..., catalog)`, `getPlanStats(plan, catalog)`, `buildShoppingList(plan, catalog)`, `getPlanRecipe(plan, key, catalog)`, and the `recipes` prop of `MealModal` / `BalanceCard` / `ShoppingList`. Importing `RECIPES`/`getRecipe` directly silently ignores user recipes and edits.
+- The `RecipeBook` is **global**, not per user: it is stored in the single `recipe_catalog` row (`id = 'global'`) and every authenticated account reads/writes it. Custom recipes, base edits and hidden recipes affect everyone. Keep that scope when adding recipe features.
+- Planner functions and UI components accept an optional `recipes` argument/prop that defaults to `RECIPES`. Thread the effective catalog through when adding features: `findRecipe(catalog, id)`, `generateWeekPlan(..., catalog)`, `getPlanStats(plan, catalog)`, `buildShoppingList(plan, catalog)`, `getPlanRecipe(plan, key, catalog)`, and the `recipes` prop of `MealModal` / `BalanceCard` / `ShoppingList`. Importing `RECIPES`/`getRecipe` directly silently ignores global recipes and edits.
 - Base recipes are declared with the local `r(...)` helper in `lib/recipes.ts`; ingredients are `"name|section"` strings (section defaults to `despensa`). Follow that pattern when adding base recipes.
 - Base-recipe edits go to `overrides` keyed by base id; deleting a base recipe adds it to `hiddenIds` (soft hide, restorable). User recipes use `custom-...` ids.
-- Deleting a recipe also clears its slots from every stored plan (`handleDeleteRecipe` in `app/page.tsx`); preserve that side effect.
+- Deleting a recipe also clears its slots from the current account's stored plans (`handleDeleteRecipe` in `app/page.tsx`); preserve that side effect. Other accounts' plans cannot be edited from the client under RLS and may keep a now-missing recipe id.
 
 ## Domain rules that look like bugs but are intentional
 
@@ -41,12 +43,14 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Persistence / Supabase
 
-- Tables: `weekly_plans` and `recipe_books`, one row per `auth.uid()` with RLS. Schema lives only in `supabase/schema.sql`; it is idempotent and applied by hand in the Supabase SQL Editor. No migration tooling is configured.
-- Anonymous sign-ins must be enabled in Supabase; otherwise cloud writes fail and the app stays in local mode.
-- Local keys: `mesa.week-plans.v1`, `mesa.recipe-book.v1`. If you change stored shapes, update `normalizeRecipeBook` / `normalizeRecipe` in `lib/recipe-book.ts`; recipes missing an id, name, valid category, or at least one ingredient are dropped on load.
-- Recipe-book sync merges local/cloud by `updatedAt` (`loadRecipeBook` in `lib/storage.ts`). Keep timestamps ISO-comparable when adding fields.
-- Keep the initial `loadPlans()` and `loadRecipeBook()` calls sequential on purpose (see the comment in `app/page.tsx`); they share the anonymous Supabase session.
-- The anon session lives in browser storage. Clearing site data creates a new anonymous user, so cloud data will appear missing. Use a fresh browser context for clean manual tests.
+- Tables: `weekly_plans` (one set of weeks per `auth.uid()`), `plan_shares` (owner/viewer read access) and `recipe_catalog` (single global row). Schema lives only in `supabase/schema.sql`; it is idempotent and applied by hand in the Supabase SQL Editor. No migration tooling is configured.
+- Email/password auth is required when Supabase is configured. Enable the Email provider; anonymous sign-ins are not used. Email confirmation may be on, so `signUpWithEmail` can return a user without a session.
+- Local plans keys: `mesa.week-plans.v2.<userId>` (or `mesa.week-plans.v2.local` without Supabase). The global recipe cache is `mesa.recipe-catalog.v2`, with the old `mesa.recipe-book.v1` read as a fallback. If you change stored shapes, update `normalizeRecipeBook` / `normalizeRecipe` in `lib/recipe-book.ts`; recipes missing an id, name, valid category, or at least one ingredient are dropped on load.
+- Recipe-catalog sync merges local/cloud by `updatedAt` (`loadRecipeBook` in `lib/storage.ts`). Because the catalog is global, last-write-wins across accounts is accepted. Keep timestamps ISO-comparable when adding fields.
+- Keep the initial `loadPlans()` and `loadRecipeBook()` calls sequential on purpose (`initializeUser` / `initializeLocal` in `app/page.tsx`). Do not auto-generate a week while viewing a shared plan; generation is own-account only.
+- `plan_shares` grants read-only access to all of an owner's weeks through the `weekly_plans` SELECT policy. Only the owner can insert/update/delete weeks. The `share_plan_with_email` security-definer RPC resolves the viewer email in `auth.users`; do not add a broad profile/email SELECT policy just to share.
+- Sharing is by registered account email. The shared view is read-only in the UI: guard every plan mutation with `readOnly`/`activeShare`, but keep the global recipe manager available.
+- Auth sessions live in browser storage. Clearing site data signs the user out. Use a fresh browser context for clean manual tests with two accounts.
 - `.env.local` holds real project values: never print, commit, or delete it. `.env.example` is the committed template.
 
 ## Styling

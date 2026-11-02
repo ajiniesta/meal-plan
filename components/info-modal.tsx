@@ -5,6 +5,7 @@ import {
   Cloud,
   HardDrive,
   Leaf,
+  Share2,
   Sparkles,
   Utensils,
   X,
@@ -120,8 +121,26 @@ export function InfoModal({ open, mode, syncError, onClose }: InfoModalProps) {
               repetidos comparten ingredientes en la compra.
             </p>
             <p className="info-note">
-              En <strong>Recetario</strong> puedes añadir tus propias recetas, cambiar
+              En <strong>Recetario</strong> puedes añadir recetas propias, cambiar
               ingredientes, temporada o categoría, y retirar los platos que no uses.
+              El recetario es común: los cambios se comparten entre todas las cuentas.
+            </p>
+          </section>
+
+          <section className="info-section">
+            <div className="info-section-title">
+              <Share2 size={17} />
+              <h3>Compartir la planificación</h3>
+            </div>
+            <p>
+              Con una cuenta, el botón <strong>Compartir</strong> de la cabecera
+              permite dar acceso de solo lectura a otra cuenta usando su correo.
+              Verá todas tus semanas, pero no podrá cambiar platos ni temporadas.
+              Puedes retirar el acceso cuando quieras.
+            </p>
+            <p className="info-note">
+              Si alguien comparte su planificación contigo, aparecerá un selector en
+              la cabecera para cambiar entre tu semana y la suya.
             </p>
           </section>
 
@@ -132,13 +151,15 @@ export function InfoModal({ open, mode, syncError, onClose }: InfoModalProps) {
             </div>
             {mode === "cloud" ? (
               <p>
-                Tus semanas y tu recetario se guardan en Supabase y también en este
-                dispositivo. Puedes volver cuando quieras sin perder nada.
+                Tus semanas se guardan en Supabase asociadas a tu cuenta y también en
+                este dispositivo. Así puedes entrar desde otro navegador sin perder
+                nada.
               </p>
             ) : (
               <p>
                 Ahora mismo la app guarda las semanas y el recetario solo en este
-                dispositivo. Si conectas Supabase, se guardarán en la nube automáticamente.
+                dispositivo. Si conectas Supabase, podrás crear una cuenta y guardar
+                todo en la nube.
               </p>
             )}
             {syncError && (

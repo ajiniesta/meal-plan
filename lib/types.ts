@@ -55,6 +55,15 @@ export interface WeekPlan {
   updatedAt: string;
 }
 
+export interface PlanShare {
+  id: string;
+  ownerId: string;
+  viewerId: string;
+  ownerEmail: string;
+  viewerEmail: string;
+  createdAt: string;
+}
+
 export interface CategoryMeta {
   label: string;
   plural: string;

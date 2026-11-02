@@ -21,8 +21,11 @@ Aplicación para generar y ajustar una semana de 7 comidas y 7 cenas. Está cons
 - Lista de la compra agregada por secciones, con ingredientes compartidos contados una sola vez y opción de copiarla.
 - Temporada automática según el mes, o forzada a verano/invierno.
 - Evita repetir platos de las últimas tres semanas al generar, sin impedir repeticiones manuales.
-- Persistencia en Supabase mediante sesión anónima, con RLS por usuario, para semanas y recetario.
-- Modo local automático si no hay variables de Supabase o falla la conexión.
+- Cuentas de usuario con correo y contraseña mediante la autenticación de Supabase.
+- Planificaciones compartidas en modo lectura: puedes dar acceso a otra cuenta por correo y retirarlo cuando quieras.
+- Recetario global: las recetas propias, las ediciones y los platos retirados son comunes para todas las cuentas.
+- Persistencia en Supabase con RLS por usuario para las semanas, y acceso de lectura para las personas con las que compartes.
+- Modo local automático si no hay variables de Supabase o si falla la conexión después de entrar.
 
 ## Arrancar en local
 
@@ -48,7 +51,7 @@ npm run typecheck  # comprobación de TypeScript
 
 1. Crea un proyecto en [supabase.com](https://supabase.com).
 2. Abre **SQL Editor** y ejecuta el contenido de [`supabase/schema.sql`](./supabase/schema.sql).
-3. Ve a **Authentication → Providers → Anonymous sign-ins** y actívalo. La app crea una sesión anónima por dispositivo para poder aplicar RLS sin pedir registro.
+3. Comprueba que **Authentication → Providers → Email** está activo. La app usa cuentas con correo y contraseña; ya no crea sesiones anónimas.
 4. Copia `.env.example` a `.env.local` y rellena los valores de **Project Settings → API**:
 
 ```bash
@@ -60,9 +63,13 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=tu-anon-key
 
 5. Reinicia el servidor de desarrollo.
 
-La app guarda cada semana en la tabla `weekly_plans` y el recetario personal en `recipe_books`, manteniendo una copia local de ambos. Si Supabase falla, sigue funcionando en local y lo indica en la cabecera.
+La app pide iniciar sesión y guarda cada semana en la tabla `weekly_plans` asociada a la cuenta. El recetario vive en una única fila de `recipe_catalog` compartida por todas las cuentas, y `plan_shares` guarda quién puede ver la planificación de quién. Se mantiene una copia local como respaldo; si Supabase falla después de entrar, la app sigue funcionando en local y lo indica en la cabecera.
 
-> La sesión es anónima y vive en este navegador. Para compartir la planificación entre dispositivos habría que añadir autenticación con email o un enlace mágico; el esquema ya está preparado para asociar cada semana a `auth.uid()`.
+> Por defecto Supabase pide confirmar el correo al registrarse. Puedes desactivarlo en **Authentication → Providers → Email → Confirm email** mientras pruebas en local. Si lo dejas activo, la persona recibirá un enlace para activar la cuenta y volverá a la app.
+>
+> Añade la URL desde la que sirves la app (por ejemplo `http://localhost:3000` y tu dominio de producción) en **Authentication → URL Configuration → Redirect URLs**. Si falta, el enlace de confirmación redirige a la Site URL configurada en Supabase en lugar de a la app.
+
+> Si actualizas desde la versión anterior, `schema.sql` crea el recetario global usando como semilla el recetario personal más reciente y después retira la tabla `recipe_books`. Las semanas antiguas siguen asociadas a su usuario anónimo; para conservarlas hay que migrarlas a mano a la nueva cuenta.
 
 ## Cómo se organiza el código
 
@@ -72,23 +79,25 @@ app/
   page.tsx            Estado principal, navegación y acciones
   globals.css         Sistema visual y responsive
 components/
-  meal-card.tsx       Tarjeta de comida/cena
+  auth-screen.tsx     Entrada, registro y confirmación de cuenta
+  share-modal.tsx     Compartir y retirar acceso a la planificación
+  meal-card.tsx       Tarjeta de comida/cena (editable o de solo lectura)
   meal-modal.tsx      Cambiar, repetir, buscar e intercambiar platos
-  recipe-manager.tsx  Recetario editable y formulario de recetas
+  recipe-manager.tsx  Recetario global editable y formulario de recetas
   balance-card.tsx    Reparto semanal y equilibrio
   shopping-list.tsx   Lista de la compra
-  info-modal.tsx      Explicación de reglas y sincronización
+  info-modal.tsx      Explicación de reglas, cuentas y sincronización
   confirm-dialog.tsx  Confirmación de regeneración
 lib/
   recipes.ts          Catálogo base de recetas y metadatos
   recipe-book.ts      Recetas propias, ediciones y catálogo efectivo
   planner.ts          Generación, cuotas, estadísticas y compra
   dates.ts            Semanas, fechas y temporada
-  storage.ts          Persistencia local + Supabase (semanas y recetario)
-  supabase.ts         Cliente y sesión anónima
+  storage.ts          Persistencia local + Supabase (semanas, recetario y accesos)
+  supabase.ts         Cliente, sesión y operaciones de autenticación
   types.ts            Tipos compartidos
 supabase/
-  schema.sql          Tablas, índices, RLS y trigger
+  schema.sql          Tablas, índices, RLS, función de compartir y triggers
 ```
 
 ## Reglas de generación
@@ -100,7 +109,15 @@ La semana se construye a partir de dos plantillas que se barajan entre los días
 
 El generador puntúa cada receta por temporada, si se ha usado en las últimas tres semanas y si encaja con el hueco. Al generar, evita repetir platos dentro de la misma semana; si el recetario no tiene suficientes opciones, reutiliza las que haya. Después puedes repetir cualquier plato manualmente desde la pestaña **Repetir**. Al cambiar o repetir un plato, el equilibrio puede variar; la tarjeta de equilibrio lo muestra en tiempo real.
 
-Los platos repetidos cuentan para el equilibrio (son dos comidas), pero sus ingredientes aparecen una sola vez en la lista de la compra, pensando en sobras. Los datos locales se guardan en `mesa.week-plans.v1` y `mesa.recipe-book.v1`.
+Los platos repetidos cuentan para el equilibrio (son dos comidas), pero sus ingredientes aparecen una sola vez en la lista de la compra, pensando en sobras. Los datos locales se guardan por cuenta en `mesa.week-plans.v2.<id>` y el recetario global en `mesa.recipe-catalog.v2`; en modo local sin Supabase se usa `mesa.week-plans.v2.local`.
+
+## Compartir la planificación
+
+- Cada persona comparte todas sus semanas desde **Compartir**, indicando el correo de otra cuenta registrada.
+- Quien recibe el acceso ve un selector en la cabecera para cambiar entre su planificación y las que le han compartido.
+- La vista compartida es de solo lectura: no se pueden cambiar platos, temporadas ni regenerar la semana. La lista de la compra y el equilibrio sí se calculan.
+- Quien comparte puede retirar el acceso cuando quiera. La función `share_plan_with_email` resuelve el correo en `auth.users` sin exponer el listado de cuentas al cliente.
+- El recetario no se comparte: directamente es global. Cualquier cuenta autenticada puede crear, editar o retirar recetas para todas.
 
 ## Despliegue
 

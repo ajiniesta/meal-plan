@@ -10,6 +10,7 @@ interface MealCardProps {
   mealType: MealType;
   recipe?: Recipe;
   repeatCount?: number;
+  readOnly?: boolean;
   onOpen: () => void;
   onQuickSwap: () => void;
 }
@@ -19,6 +20,7 @@ export function MealCard({
   mealType,
   recipe,
   repeatCount = 0,
+  readOnly = false,
   onOpen,
   onQuickSwap,
 }: MealCardProps) {
@@ -32,59 +34,105 @@ export function MealCard({
 
   if (!recipe || !meta) {
     return (
-      <article className="meal-card meal-card-empty" style={style}>
-        <button className="meal-card-main" onClick={onOpen} type="button">
-          <span className="meal-type">{mealType === "comida" ? "Comida" : "Cena"}</span>
-          <span className="meal-empty-plus">+</span>
-          <span className="meal-empty-text">Añadir plato</span>
-        </button>
+      <article
+        className={`meal-card meal-card-empty ${readOnly ? "read-only" : ""}`}
+        style={style}
+      >
+        {readOnly ? (
+          <div className="meal-card-main">
+            <span className="meal-type">
+              {mealType === "comida" ? "Comida" : "Cena"}
+            </span>
+            <span className="meal-empty-text">Sin planificar</span>
+          </div>
+        ) : (
+          <button className="meal-card-main" onClick={onOpen} type="button">
+            <span className="meal-type">
+              {mealType === "comida" ? "Comida" : "Cena"}
+            </span>
+            <span className="meal-empty-plus">+</span>
+            <span className="meal-empty-text">Añadir plato</span>
+          </button>
+        )}
       </article>
     );
   }
 
   return (
-    <article className="meal-card" style={style}>
-      <button
-        className="meal-card-main"
-        onClick={onOpen}
-        type="button"
-        aria-label={`${recipe.name}${repeatCount > 1 ? `, repetido ${repeatCount} veces esta semana` : ""}. Abrir opciones para ${mealKey}`}
-      >
-        <span className="meal-card-top">
-          <span className="meal-type">
-            {mealType === "comida" ? "Comida" : "Cena"}
-            {repeatCount > 1 && (
-              <span
-                className="meal-repeat"
-                title={`Este plato se repite ${repeatCount} veces esta semana`}
-              >
-                ×{repeatCount}
+    <article className={`meal-card ${readOnly ? "read-only" : ""}`} style={style}>
+      {readOnly ? (
+        <div className="meal-card-main">
+          <span className="meal-card-top">
+            <span className="meal-type">
+              {mealType === "comida" ? "Comida" : "Cena"}
+              {repeatCount > 1 && (
+                <span
+                  className="meal-repeat"
+                  title={`Este plato se repite ${repeatCount} veces esta semana`}
+                >
+                  ×{repeatCount}
+                </span>
+              )}
+            </span>
+            <span className="meal-emoji" aria-hidden="true">
+              {recipe.emoji}
+            </span>
+          </span>
+          <h3 className="meal-name">{recipe.name}</h3>
+          <span className="meal-category">
+            <span className="meal-category-dot" />
+            <span className="meal-category-label">
+              {recipe.fishKind
+                ? `P. ${FISH_LABELS[recipe.fishKind].replace("Pescado ", "")}`
+                : meta.label}
+            </span>
+          </span>
+        </div>
+      ) : (
+        <>
+          <button
+            className="meal-card-main"
+            onClick={onOpen}
+            type="button"
+            aria-label={`${recipe.name}${repeatCount > 1 ? `, repetido ${repeatCount} veces esta semana` : ""}. Abrir opciones para ${mealKey}`}
+          >
+            <span className="meal-card-top">
+              <span className="meal-type">
+                {mealType === "comida" ? "Comida" : "Cena"}
+                {repeatCount > 1 && (
+                  <span
+                    className="meal-repeat"
+                    title={`Este plato se repite ${repeatCount} veces esta semana`}
+                  >
+                    ×{repeatCount}
+                  </span>
+                )}
               </span>
-            )}
-          </span>
-          <span className="meal-emoji" aria-hidden="true">
-            {recipe.emoji}
-          </span>
-        </span>
-        <h3 className="meal-name">{recipe.name}</h3>
-        <span className="meal-category">
-          <span className="meal-category-dot" />
-          <span className="meal-category-label">
-            {recipe.fishKind
-              ? `P. ${FISH_LABELS[recipe.fishKind].replace("Pescado ", "")}`
-              : meta.label}
-          </span>
-        </span>
-      </button>
-      <button
-        className="meal-quick-swap"
-        type="button"
-        onClick={onQuickSwap}
-        aria-label={`Proponer otro plato para ${mealKey}`}
-        title="Proponer otro plato"
-      >
-        <Shuffle size={13} strokeWidth={2.2} />
-      </button>
+              <span className="meal-emoji" aria-hidden="true">
+                {recipe.emoji}
+              </span>
+            </span>
+            <h3 className="meal-name">{recipe.name}</h3>
+            <span className="meal-category">
+              <span className="meal-category-dot" />
+              <span className="meal-category-label">
+                {recipe.fishKind
+                  ? `P. ${FISH_LABELS[recipe.fishKind].replace("Pescado ", "")}`
+                  : meta.label}
+              </span>
+            </span>
+          </button>
+          <button
+            className="meal-quick-swap"
+            type="button"
+            onClick={onQuickSwap}
+            aria-label={`Proponer otro plato para ${mealKey}`}
+            title="Proponer otro plato"
+          >
+            <Shuffle size={13} strokeWidth={2.2} />
+          </button>
+        </>
+      )}
     </article>
   );
 }

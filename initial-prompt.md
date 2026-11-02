@@ -7,6 +7,8 @@ La aplicación podrá generar una semana de comidas en base a los datos datos a 
 Se tiene que poder elegir repetir la misma comida en la misma semana por temas logísticos, sobras de un plato, etc. Repetir comidas entre semanas desgasta, pero comer para reutilizar es necesario de vez en cuando, sobre todo si se hace comida en cantidad.
 También se tiene que poder editar la lista de platos, así como añadir nuevos, cambiar sus ingredientes que ahora mismo aparecen hardcodeados.
 
+Es necesario incluir usuarios usando la capa de autenticación de supabase. Un usuario puede ver su planificación o la planificación semanal de otro usuario que le haya compartido la suya. El recetario es común de todos los usuarios, como una base global de los usuarios.
+
 # Alimentos
 
 Los tipos de alimentos y alimentos van a ser estos inicialmente.

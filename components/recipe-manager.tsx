@@ -472,9 +472,10 @@ export function RecipeManager({
                   {error
                     ? "Recetario guardado solo en este dispositivo. No se pudo sincronizar con Supabase."
                     : mode === "cloud"
-                      ? "Recetario guardado en Supabase y en este dispositivo."
+                      ? "Recetario común guardado en Supabase y en este dispositivo."
                       : "Recetario guardado solo en este dispositivo."}{" "}
-                  Los cambios se aplican a la planificación y a la lista de la compra.
+                  Los cambios se aplican a la planificación de todas las cuentas y a
+                  la lista de la compra.
                 </p>
                 {error && (
                   <p className="info-warning">
@@ -486,7 +487,8 @@ export function RecipeManager({
                     <div className="recipe-confirm">
                       <p>
                         Se recuperarán los platos originales y se perderán las
-                        ediciones de los platos base. Tus recetas propias se mantienen.
+                        ediciones de los platos base en todas las cuentas. Las
+                        recetas propias se mantienen.
                       </p>
                       <div className="recipe-confirm-actions">
                         <button
@@ -691,8 +693,9 @@ export function RecipeManager({
                   <div className="recipe-confirm">
                     <p>
                       Se eliminará «{draft.name || "este plato"}» del recetario
+                      común para todas las cuentas
                       {usage > 0
-                        ? ` y de ${usage} ${usage === 1 ? "plato planificado" : "platos planificados"}.`
+                        ? ` y de ${usage} ${usage === 1 ? "plato planificado" : "platos planificados"} tuyos.`
                         : "."}
                     </p>
                     <div className="recipe-confirm-actions">
