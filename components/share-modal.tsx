@@ -96,7 +96,7 @@ export function ShareModal({
 
     setEmail("");
     setSuccess(
-      `Ahora ${result.share.viewerEmail} puede ver tus semanas en modo lectura.`,
+      `Ahora ${result.share.viewerEmail} puede ver y editar tus semanas.`,
     );
     await onChanged(`Planificación compartida con ${result.share.viewerEmail}`);
   };
@@ -140,7 +140,7 @@ export function ShareModal({
               <Share2 size={23} />
             </div>
             <div className="modal-head-copy">
-              <span className="modal-eyebrow">Solo lectura</span>
+              <span className="modal-eyebrow">Colaboración</span>
               <h2>Compartir planificación</h2>
             </div>
           </div>
@@ -156,9 +156,9 @@ export function ShareModal({
 
         <div className="modal-body share-body">
           <p className="share-intro">
-            Las personas que añadas podrán ver todas tus semanas, pero no podrán
-            cambiar platos ni temporadas. El recetario ya es común para todas las
-            cuentas.
+            Las personas que añadas podrán ver y editar todas tus semanas. Solo tú
+            puedes gestionar quién tiene acceso. El recetario ya es común para todas
+            las cuentas.
           </p>
 
           {ownerEmail && (

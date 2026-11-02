@@ -9,6 +9,10 @@ También se tiene que poder editar la lista de platos, así como añadir nuevos,
 
 Es necesario incluir usuarios usando la capa de autenticación de supabase. Un usuario puede ver su planificación o la planificación semanal de otro usuario que le haya compartido la suya. El recetario es común de todos los usuarios, como una base global de los usuarios.
 
+Quiero que los colaboradores del plan puedan editar el plan de comidas.
+
+También debe de ser capaz de ser usable desde el móvil.
+
 # Alimentos
 
 Los tipos de alimentos y alimentos van a ser estos inicialmente.

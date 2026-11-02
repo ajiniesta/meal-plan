@@ -325,43 +325,9 @@ export async function loadPlans(userId?: string): Promise<LoadPlansResult> {
   }
 }
 
-/** Lee las semanas de otra persona con la que se ha compartido la planificación. */
+/** Lee (y sincroniza) las semanas de otra persona con la que se comparte el plan. */
 export async function loadPlansForOwner(ownerId: string): Promise<LoadPlansResult> {
-  const client = getSupabaseClient();
-  if (!client) {
-    return {
-      plans: [],
-      mode: "local",
-      error: "Supabase no está configurado en este dispositivo.",
-    };
-  }
-
-  try {
-    await withTimeout(requireSessionUser(client));
-    const { data, error } = await withTimeout(
-      client
-        .from(TABLE)
-        .select("week_start, season_mode, meals, created_at, updated_at")
-        .eq("user_id", ownerId)
-        .order("week_start", { ascending: true }),
-    );
-
-    if (error) throw new Error(error.message);
-
-    return {
-      plans: ((data ?? []) as RemotePlanRow[]).map(rowToPlan),
-      mode: "cloud",
-    };
-  } catch (error) {
-    return {
-      plans: [],
-      mode: "local",
-      error:
-        error instanceof Error
-          ? friendlyStorageError(error.message)
-          : "No se pudo cargar la planificación compartida.",
-    };
-  }
+  return loadPlans(ownerId);
 }
 
 export async function savePlan(
@@ -374,7 +340,7 @@ export async function savePlan(
   if (!client) return { mode: "local" };
 
   if (!userId) {
-    return { mode: "local", error: "Inicia sesión para guardar tus semanas." };
+    return { mode: "local", error: "Inicia sesión para guardar la planificación." };
   }
 
   try {

@@ -21,10 +21,11 @@ Aplicación para generar y ajustar una semana de 7 comidas y 7 cenas. Está cons
 - Lista de la compra agregada por secciones, con ingredientes compartidos contados una sola vez y opción de copiarla.
 - Temporada automática según el mes, o forzada a verano/invierno.
 - Evita repetir platos de las últimas tres semanas al generar, sin impedir repeticiones manuales.
+- Interfaz usable en móvil: barra superior compacta, planificación deslizable, hojas inferiores para los modales y lista de la compra sin scroll anidado.
 - Cuentas de usuario con correo y contraseña mediante la autenticación de Supabase.
-- Planificaciones compartidas en modo lectura: puedes dar acceso a otra cuenta por correo y retirarlo cuando quieras.
+- Planificaciones compartidas en modo colaboración: puedes dar acceso de edición a otra cuenta por correo y retirarlo cuando quieras.
 - Recetario global: las recetas propias, las ediciones y los platos retirados son comunes para todas las cuentas.
-- Persistencia en Supabase con RLS por usuario para las semanas, y acceso de lectura para las personas con las que compartes.
+- Persistencia en Supabase con RLS por usuario para las semanas, y acceso de edición para las personas con las que compartes.
 - Modo local automático si no hay variables de Supabase o si falla la conexión después de entrar.
 
 ## Arrancar en local
@@ -63,13 +64,13 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=tu-anon-key
 
 5. Reinicia el servidor de desarrollo.
 
-La app pide iniciar sesión y guarda cada semana en la tabla `weekly_plans` asociada a la cuenta. El recetario vive en una única fila de `recipe_catalog` compartida por todas las cuentas, y `plan_shares` guarda quién puede ver la planificación de quién. Se mantiene una copia local como respaldo; si Supabase falla después de entrar, la app sigue funcionando en local y lo indica en la cabecera.
+La app pide iniciar sesión y guarda cada semana en la tabla `weekly_plans` asociada a la cuenta. El recetario vive en una única fila de `recipe_catalog` compartida por todas las cuentas, y `plan_shares` guarda quién puede editar la planificación de quién. Se mantiene una copia local como respaldo; si Supabase falla después de entrar, la app sigue funcionando en local y lo indica en la cabecera.
 
 > Por defecto Supabase pide confirmar el correo al registrarse. Puedes desactivarlo en **Authentication → Providers → Email → Confirm email** mientras pruebas en local. Si lo dejas activo, la persona recibirá un enlace para activar la cuenta y volverá a la app.
 >
 > Añade la URL desde la que sirves la app (por ejemplo `http://localhost:3000` y tu dominio de producción) en **Authentication → URL Configuration → Redirect URLs**. Si falta, el enlace de confirmación redirige a la Site URL configurada en Supabase en lugar de a la app.
 
-> Si actualizas desde la versión anterior, `schema.sql` crea el recetario global usando como semilla el recetario personal más reciente y después retira la tabla `recipe_books`. Las semanas antiguas siguen asociadas a su usuario anónimo; para conservarlas hay que migrarlas a mano a la nueva cuenta.
+> Si actualizas desde la versión anterior, vuelve a ejecutar `schema.sql`: crea el recetario global usando como semilla el recetario personal más reciente, retira la tabla `recipe_books` y actualiza las políticas para que los colaboradores puedan editar las semanas compartidas. Las semanas antiguas siguen asociadas a su usuario anónimo; para conservarlas hay que migrarlas a mano a la nueva cuenta.
 
 ## Cómo se organiza el código
 
@@ -81,7 +82,7 @@ app/
 components/
   auth-screen.tsx     Entrada, registro y confirmación de cuenta
   share-modal.tsx     Compartir y retirar acceso a la planificación
-  meal-card.tsx       Tarjeta de comida/cena (editable o de solo lectura)
+  meal-card.tsx       Tarjeta de comida/cena
   meal-modal.tsx      Cambiar, repetir, buscar e intercambiar platos
   recipe-manager.tsx  Recetario global editable y formulario de recetas
   balance-card.tsx    Reparto semanal y equilibrio
@@ -114,9 +115,11 @@ Los platos repetidos cuentan para el equilibrio (son dos comidas), pero sus ingr
 ## Compartir la planificación
 
 - Cada persona comparte todas sus semanas desde **Compartir**, indicando el correo de otra cuenta registrada.
-- Quien recibe el acceso ve un selector en la cabecera para cambiar entre su planificación y las que le han compartido.
-- La vista compartida es de solo lectura: no se pueden cambiar platos, temporadas ni regenerar la semana. La lista de la compra y el equilibrio sí se calculan.
-- Quien comparte puede retirar el acceso cuando quiera. La función `share_plan_with_email` resuelve el correo en `auth.users` sin exponer el listado de cuentas al cliente.
+- Quien recibe el acceso se convierte en colaborador: puede ver y editar las semanas compartidas, cambiar platos, elegir temporada y regenerar la semana. Los cambios se guardan en la cuenta de quien comparte.
+- Solo el dueño puede gestionar los accesos y retirarlos cuando quiera. No puede borrar semanas desde la vista compartida.
+- La vista compartida muestra un selector en la cabecera para cambiar entre tu planificación y las que te han compartido.
+- No hay sincronización en tiempo real: los cambios de otra persona se ven al recargar o al volver a entrar en esa planificación. Si dos personas editan la misma semana a la vez, prevalece la última edición guardada.
+- La función `share_plan_with_email` resuelve el correo en `auth.users` sin exponer el listado de cuentas al cliente.
 - El recetario no se comparte: directamente es global. Cualquier cuenta autenticada puede crear, editar o retirar recetas para todas.
 
 ## Despliegue

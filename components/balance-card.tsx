@@ -8,16 +8,10 @@ import type { Recipe, WeekPlan } from "@/lib/types";
 interface BalanceCardProps {
   plan?: WeekPlan;
   recipes: Recipe[];
-  readOnly?: boolean;
   onRebalance: () => void;
 }
 
-export function BalanceCard({
-  plan,
-  recipes,
-  readOnly = false,
-  onRebalance,
-}: BalanceCardProps) {
+export function BalanceCard({ plan, recipes, onRebalance }: BalanceCardProps) {
   const stats = plan ? getPlanStats(plan, recipes) : null;
   const unique = plan ? new Set(Object.values(plan.meals).filter(Boolean)).size : 0;
   const repeated = (stats?.total ?? 0) - unique;
@@ -99,7 +93,7 @@ export function BalanceCard({
                 : `${unique} platos · ${repeated} repetido${repeated === 1 ? "" : "s"}`}
           </span>
         </div>
-        {plan && !readOnly && (
+        {plan && (
           <button type="button" className="text-button" onClick={onRebalance}>
             <RefreshCw size={13} />
             Reequilibrar

@@ -228,8 +228,8 @@ export function AuthScreen({ onAuthenticated }: AuthScreenProps) {
               <Share2 size={16} />
             </span>
             <div>
-              <strong>Comparte en modo lectura</strong>
-              <p>Otra persona puede ver tus semanas sin poder cambiarlas.</p>
+              <strong>Comparte y edita juntos</strong>
+              <p>Otra persona puede ver y cambiar tus semanas contigo.</p>
             </div>
           </li>
           <li>

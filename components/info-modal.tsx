@@ -134,13 +134,14 @@ export function InfoModal({ open, mode, syncError, onClose }: InfoModalProps) {
             </div>
             <p>
               Con una cuenta, el botón <strong>Compartir</strong> de la cabecera
-              permite dar acceso de solo lectura a otra cuenta usando su correo.
-              Verá todas tus semanas, pero no podrá cambiar platos ni temporadas.
-              Puedes retirar el acceso cuando quieras.
+              permite dar acceso de edición a otra cuenta usando su correo. Podrá
+              ver y cambiar los platos y la temporada de todas tus semanas. Puedes
+              retirar el acceso cuando quieras.
             </p>
             <p className="info-note">
               Si alguien comparte su planificación contigo, aparecerá un selector en
-              la cabecera para cambiar entre tu semana y la suya.
+              la cabecera para cambiar entre tu semana y la suya. Ambos podéis editar
+              las mismas semanas; prevalece la última edición guardada.
             </p>
           </section>
 

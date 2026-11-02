@@ -27,6 +27,8 @@
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -54,6 +56,7 @@ input {
 button {
   color: inherit;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 button:disabled {
@@ -79,6 +82,7 @@ p {
 
 .app {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* ── Barra superior ─────────────────────────────────────────────────── */
@@ -944,6 +948,7 @@ p {
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+  scroll-margin-top: 84px;
 }
 
 .side-card {
@@ -1363,6 +1368,7 @@ p {
   flex-direction: column;
   width: min(780px, 100%);
   max-height: 88vh;
+  max-height: 88dvh;
   overflow: hidden;
   background: var(--surface);
   border: 1px solid rgba(255, 255, 255, 0.62);
@@ -2068,6 +2074,7 @@ p {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .loading-brand {
@@ -2836,6 +2843,7 @@ p {
   align-items: center;
   width: min(1120px, 100%);
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0 auto;
   padding: 40px 32px;
 }
@@ -3224,20 +3232,6 @@ p {
   font-size: 11px;
 }
 
-.meal-card.read-only {
-  cursor: default;
-}
-
-.meal-card.read-only:hover {
-  border-color: rgba(31, 42, 36, 0.075);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
-  transform: none;
-}
-
-.meal-card.read-only .meal-card-main {
-  cursor: default;
-}
-
 /* ── Compartir planificación ────────────────────────────────────────── */
 
 .share-modal {
@@ -3430,30 +3424,39 @@ p {
 
 @media (max-width: 760px) {
   .topbar-inner {
-    flex-wrap: wrap;
-    row-gap: 8px;
+    flex-wrap: nowrap;
+    gap: 10px;
+  }
+
+  .brand {
+    flex: 0 0 auto;
   }
 
   .topbar-actions {
-    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
     justify-content: flex-end;
   }
 
-  .sync-status {
+  /* El estado de sincronización abre el mismo modal de ayuda */
+  .info-button {
     display: none;
   }
 
   .planning-switcher {
-    height: 36px;
+    height: 40px;
+    min-width: 0;
     padding: 0 8px;
   }
 
   .planning-switcher select {
-    max-width: 95px;
+    max-width: 132px;
+    min-width: 0;
   }
 
   .user-chip {
-    height: 36px;
+    height: 40px;
+    min-width: 0;
     padding: 0 5px;
   }
 
@@ -3486,5 +3489,171 @@ p {
 
   .share-confirm {
     justify-content: flex-start;
+  }
+
+  /* Barra superior compacta y con objetivos táctiles cómodos */
+  .topbar-inner {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .topbar-actions {
+    gap: 7px;
+  }
+
+  .icon-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .icon-button.small {
+    width: 34px;
+    height: 34px;
+  }
+
+  .meal-category {
+    padding-right: 30px;
+  }
+
+  .sidebar {
+    scroll-margin-top: 76px;
+  }
+
+  .shared-banner-inner strong {
+    overflow-wrap: anywhere;
+  }
+
+  /* Evita el zoom automático de iOS al enfocar un formulario */
+  .field input,
+  .field select,
+  .auth-input,
+  .auth-input input,
+  .field > .auth-input,
+  .search-field input,
+  .ingredient-row input,
+  .ingredient-row select,
+  .planning-switcher select {
+    font-size: 16px;
+  }
+
+  /* La semana se desliza en horizontal con inercia */
+  .week-scroll {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scroll-padding-inline: 3px;
+  }
+
+  .meal-quick-swap {
+    right: 6px;
+    bottom: 6px;
+    width: 32px;
+    height: 32px;
+  }
+
+  /* Objetivos táctiles más cómodos */
+  .text-button {
+    min-height: 32px;
+    padding: 4px 2px;
+  }
+
+  .shopping-groups {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .shopping-item {
+    padding: 9px 0;
+    font-size: 12px;
+  }
+
+  .shopping-box {
+    width: 20px;
+    height: 20px;
+  }
+
+  .recipe-filters button {
+    height: 34px;
+    padding: 0 11px;
+    font-size: 10.5px;
+  }
+
+  .scope-switch button {
+    height: 36px;
+    padding: 0 12px;
+    font-size: 10.5px;
+  }
+
+  .ingredient-row .icon-button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .ingredient-row {
+    grid-template-columns: minmax(0, 1fr) 36px;
+  }
+
+  .modal-tabs button {
+    height: 40px;
+  }
+
+  /* En móvil el modal entero hace scroll, sin listas anidadas */
+  .alternatives-grid {
+    max-height: none;
+  }
+
+  .recipe-list {
+    max-height: none;
+    padding-right: 0;
+    overflow-y: visible;
+  }
+
+  /* Hoja inferior adaptada a la barra del navegador y al notch */
+  .modal {
+    max-height: 92vh;
+    max-height: 92dvh;
+  }
+
+  .modal-body {
+    padding-bottom: max(18px, calc(12px + env(safe-area-inset-bottom)));
+    scroll-padding-bottom: 28px;
+    overscroll-behavior: contain;
+  }
+
+  .toast {
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 400px) {
+  .topbar-inner {
+    gap: 8px;
+  }
+
+  .brand-name {
+    display: none;
+  }
+
+  .topbar-actions {
+    gap: 6px;
+  }
+
+  .planning-switcher select {
+    max-width: 106px;
+  }
+
+  .hero h1 {
+    font-size: 34px;
+  }
+
+  .hero-lead {
+    font-size: 13.5px;
+  }
+
+  .week-grid {
+    grid-template-columns: repeat(7, 124px);
+  }
+
+  .side-card {
+    padding: 16px;
   }
 }

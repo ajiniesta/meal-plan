@@ -28,7 +28,9 @@ grant select, insert, update, delete on public.weekly_plans to authenticated;
 drop policy if exists "Cada persona lee sus semanas" on public.weekly_plans;
 drop policy if exists "Cada persona lee sus semanas y las compartidas" on public.weekly_plans;
 drop policy if exists "Cada persona crea sus semanas" on public.weekly_plans;
+drop policy if exists "Cada persona crea sus semanas y las compartidas" on public.weekly_plans;
 drop policy if exists "Cada persona actualiza sus semanas" on public.weekly_plans;
+drop policy if exists "Cada persona actualiza sus semanas y las compartidas" on public.weekly_plans;
 drop policy if exists "Cada persona borra sus semanas" on public.weekly_plans;
 
 -- ── Planificaciones compartidas ───────────────────────────────────────────
@@ -63,7 +65,9 @@ create policy "Quien comparte puede retirar el acceso"
   for delete
   using (auth.uid() = owner_id or auth.uid() = viewer_id);
 
--- El dueño ve sus semanas y también las semanas que le han compartido.
+-- Una persona ve sus semanas y también las que le han compartido. Quien
+-- recibe el acceso es colaborador: puede leer y editar, pero no borrar la
+-- semana ni cambiar de dueño.
 create policy "Cada persona lee sus semanas y las compartidas"
   on public.weekly_plans
   for select
@@ -77,24 +81,69 @@ create policy "Cada persona lee sus semanas y las compartidas"
     )
   );
 
-create policy "Cada persona crea sus semanas"
+create policy "Cada persona crea sus semanas y las compartidas"
   on public.weekly_plans
   for insert
-  with check (auth.uid() = user_id);
+  with check (
+    auth.uid() = user_id
+    or exists (
+      select 1
+      from public.plan_shares as shared
+      where shared.owner_id = weekly_plans.user_id
+        and shared.viewer_id = auth.uid()
+    )
+  );
 
-create policy "Cada persona actualiza sus semanas"
+create policy "Cada persona actualiza sus semanas y las compartidas"
   on public.weekly_plans
   for update
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+  using (
+    auth.uid() = user_id
+    or exists (
+      select 1
+      from public.plan_shares as shared
+      where shared.owner_id = weekly_plans.user_id
+        and shared.viewer_id = auth.uid()
+    )
+  )
+  with check (
+    auth.uid() = user_id
+    or exists (
+      select 1
+      from public.plan_shares as shared
+      where shared.owner_id = weekly_plans.user_id
+        and shared.viewer_id = auth.uid()
+    )
+  );
 
 create policy "Cada persona borra sus semanas"
   on public.weekly_plans
   for delete
   using (auth.uid() = user_id);
 
--- Comparte todas las semanas de una persona con la cuenta indicada por correo.
--- Se resuelve el correo en auth.users sin exponer la lista de cuentas al cliente.
+-- Un colaborador nunca puede quedarse una semana cambiando su dueño.
+create or replace function public.protect_plan_owner()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.user_id <> old.user_id then
+    raise exception 'PLAN_OWNER_IMMUTABLE';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists weekly_plans_protect_owner on public.weekly_plans;
+create trigger weekly_plans_protect_owner
+  before update on public.weekly_plans
+  for each row
+  execute function public.protect_plan_owner();
+
+-- Comparte todas las semanas de una persona, con permiso de edición, con la
+-- cuenta indicada por correo. Se resuelve el correo en auth.users sin exponer
+-- la lista de cuentas al cliente.
 create or replace function public.share_plan_with_email(target_email text)
 returns public.plan_shares
 language plpgsql

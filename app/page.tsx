@@ -87,6 +87,15 @@ interface ToastState {
   message: string;
 }
 
+function upsertPlan(plans: WeekPlan[], plan: WeekPlan): WeekPlan[] {
+  const exists = plans.some((item) => item.weekStart === plan.weekStart);
+  const next = exists
+    ? plans.map((item) => (item.weekStart === plan.weekStart ? plan : item))
+    : [...plans, plan];
+
+  return next.sort((left, right) => left.weekStart.localeCompare(right.weekStart));
+}
+
 function LoadingScreen({ label }: { label: string }) {
   return (
     <div className="loading-screen">
@@ -328,7 +337,6 @@ export default function HomePage() {
     [shares, user],
   );
 
-  const readOnly = Boolean(activeShare);
   const activePlans = activeShare ? sharedPlans : plans;
 
   const currentPlan = useMemo(
@@ -387,40 +395,40 @@ export default function HomePage() {
         updatedAt: new Date().toISOString(),
       };
 
-      setPlans((previous) => {
-        const exists = previous.some((item) => item.weekStart === stamped.weekStart);
-        const next = exists
-          ? previous.map((item) =>
-              item.weekStart === stamped.weekStart ? stamped : item,
-            )
-          : [...previous, stamped];
-        return next.sort((left, right) =>
-          left.weekStart.localeCompare(right.weekStart),
-        );
-      });
+      // Al editar un plan compartido, la semana pertenece a su dueño.
+      const ownerId = activeShare?.ownerId ?? user?.id;
 
-      void savePlan(stamped, user?.id).then((result) => {
+      if (activeShare) {
+        setSharedPlans((previous) => upsertPlan(previous, stamped));
+      } else {
+        setPlans((previous) => upsertPlan(previous, stamped));
+      }
+
+      void savePlan(stamped, ownerId).then((result) => {
         setMode(result.mode);
         if (result.error) setSyncError(result.error);
         else setSyncError(undefined);
       });
     },
-    [user],
+    [user, activeShare],
   );
 
   const handleGenerate = useCallback(
     (targetWeek = weekStart, seasonMode = selectedSeason) => {
-      if (!targetWeek || readOnly) return;
-      const history = plans.filter((plan) => plan.weekStart !== targetWeek);
+      if (!targetWeek) return;
+      const history = activePlans.filter((plan) => plan.weekStart !== targetWeek);
       const next = generateWeekPlan(targetWeek, seasonMode, history, recipes);
       persist(next);
-      notify("Semana generada con equilibrio y temporada");
+      notify(
+        activeShare
+          ? "Semana compartida generada con equilibrio y temporada"
+          : "Semana generada con equilibrio y temporada",
+      );
     },
-    [weekStart, selectedSeason, plans, recipes, persist, notify, readOnly],
+    [weekStart, selectedSeason, activePlans, recipes, persist, notify, activeShare],
   );
 
   const requestGenerate = () => {
-    if (readOnly) return;
     if (currentPlan) {
       setConfirmOpen(true);
       return;
@@ -429,7 +437,6 @@ export default function HomePage() {
   };
 
   const handleSeasonChange = (nextMode: SeasonMode) => {
-    if (readOnly) return;
     setSelectedSeason(nextMode);
     if (currentPlan) {
       persist({ ...currentPlan, seasonMode: nextMode });
@@ -461,7 +468,7 @@ export default function HomePage() {
   };
 
   const handleQuickSwap = (mealKey: MealKey) => {
-    if (!currentPlan || readOnly) return;
+    if (!currentPlan) return;
     const currentRecipe = findRecipe(recipes, currentPlan.meals[mealKey]);
     if (!currentRecipe) return;
 
@@ -470,7 +477,7 @@ export default function HomePage() {
         .filter(([key]) => key !== mealKey)
         .map(([, recipeId]) => recipeId),
     );
-    const recentIds = getRecentRecipeIds(plans, currentPlan.weekStart);
+    const recentIds = getRecentRecipeIds(activePlans, currentPlan.weekStart);
     const season = getSeasonContext(
       currentPlan.weekStart,
       currentPlan.seasonMode,
@@ -503,7 +510,7 @@ export default function HomePage() {
   };
 
   const handleSelect = (mealKey: MealKey, recipeId: string) => {
-    if (!currentPlan || readOnly) return;
+    if (!currentPlan) return;
     const repeated = Object.entries(currentPlan.meals).some(
       ([key, id]) => key !== mealKey && id === recipeId,
     );
@@ -515,7 +522,7 @@ export default function HomePage() {
   };
 
   const handleSwap = (from: MealKey, to: MealKey) => {
-    if (!currentPlan || readOnly) return;
+    if (!currentPlan) return;
     const meals = { ...currentPlan.meals };
     const fromRecipe = meals[from];
     meals[from] = meals[to];
@@ -550,7 +557,7 @@ export default function HomePage() {
       const result = await loadPlansForOwner(share.ownerId);
       if (generation !== viewGenerationRef.current) return;
 
-      if (result.error) {
+      if (result.error && result.plans.length === 0) {
         setActiveShare(null);
         setSharedPlans([]);
         setViewLoading(false);
@@ -564,6 +571,7 @@ export default function HomePage() {
       const target = result.plans.find((plan) => plan.weekStart === weekStart);
       setSelectedSeason(target?.seasonMode ?? "auto");
       setViewLoading(false);
+      if (result.error) notify(result.error);
     },
     [shares, plans, weekStart, user, notify],
   );
@@ -682,7 +690,7 @@ export default function HomePage() {
     });
 
     let removed = 0;
-    for (const plan of plans) {
+    for (const plan of activePlans) {
       const keys = Object.entries(plan.meals)
         .filter(([, recipeId]) => recipeId === id)
         .map(([key]) => key);
@@ -748,7 +756,12 @@ export default function HomePage() {
     <div className="app">
       <header className="topbar">
         <div className="topbar-inner">
-          <button className="brand" type="button" onClick={goToCurrentWeek}>
+          <button
+            className="brand"
+            type="button"
+            onClick={goToCurrentWeek}
+            aria-label="Mesa · ir a la semana actual"
+          >
             <span className="brand-mark">
               <Leaf size={17} />
             </span>
@@ -784,6 +797,7 @@ export default function HomePage() {
                 type="button"
                 onClick={() => setShareOpen(true)}
                 title="Compartir mi planificación"
+                aria-label="Compartir mi planificación"
               >
                 <Share2 size={14} />
                 <span>Compartir</span>
@@ -801,7 +815,7 @@ export default function HomePage() {
               <span>{mode === "cloud" ? "Sincronizado" : "Solo este dispositivo"}</span>
             </button>
             <button
-              className="icon-button"
+              className="icon-button info-button"
               type="button"
               onClick={() => setInfoOpen(true)}
               aria-label="Cómo funciona"
@@ -834,8 +848,8 @@ export default function HomePage() {
           <div className="shared-banner-inner">
             <Users size={15} />
             <span>
-              Estás viendo la planificación de <strong>{sharedOwner}</strong>.
-              Solo lectura.
+              Colaboras en la planificación de <strong>{sharedOwner}</strong>. Los
+              cambios se guardan en su cuenta.
             </span>
             <button
               type="button"
@@ -863,71 +877,37 @@ export default function HomePage() {
             </h1>
             <p className="hero-lead">
               {activeShare
-                ? `Consulta los platos, el equilibrio y la lista de la compra de ${sharedOwner}. Los cambios son solo suyos.`
+                ? `Edita con ${sharedOwner} su semana: cambia platos, temporada y lista de la compra. Los cambios se guardan en su planificación.`
                 : "Una semana de comidas y cenas equilibradas, con temporada, variedad y lista de la compra incluida. Cámbiala cuando te apetezca."}
             </p>
             <div className="hero-actions">
-              {activeShare ? (
-                <>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={() => void handleActivePlanningChange("own")}
-                  >
-                    <UserRound size={17} />
-                    Mi planificación
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={scrollToShopping}
-                  >
-                    <ShoppingBasket size={17} />
-                    Lista de la compra
-                    {shoppingCount > 0 && (
-                      <span className="btn-count">{shoppingCount}</span>
-                    )}
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={() => setManagerOpen(true)}
-                  >
-                    <BookOpen size={17} />
-                    Recetario común
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    className="btn btn-primary"
-                    type="button"
-                    onClick={requestGenerate}
-                  >
-                    <RefreshCw size={17} />
-                    {currentPlan ? "Regenerar semana" : "Generar semana"}
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={scrollToShopping}
-                  >
-                    <ShoppingBasket size={17} />
-                    Lista de la compra
-                    {shoppingCount > 0 && (
-                      <span className="btn-count">{shoppingCount}</span>
-                    )}
-                  </button>
-                  <button
-                    className="btn btn-secondary"
-                    type="button"
-                    onClick={() => setManagerOpen(true)}
-                  >
-                    <BookOpen size={17} />
-                    Recetario
-                  </button>
-                </>
-              )}
+              <button
+                className="btn btn-primary"
+                type="button"
+                onClick={requestGenerate}
+              >
+                <RefreshCw size={17} />
+                {currentPlan ? "Regenerar semana" : "Generar semana"}
+              </button>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={scrollToShopping}
+              >
+                <ShoppingBasket size={17} />
+                Lista de la compra
+                {shoppingCount > 0 && (
+                  <span className="btn-count">{shoppingCount}</span>
+                )}
+              </button>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => setManagerOpen(true)}
+              >
+                <BookOpen size={17} />
+                Recetario
+              </button>
             </div>
           </div>
 
@@ -987,7 +967,6 @@ export default function HomePage() {
                   type="button"
                   className={selectedSeason === "auto" ? "active" : ""}
                   onClick={() => handleSeasonChange("auto")}
-                  disabled={readOnly}
                 >
                   Auto
                 </button>
@@ -995,7 +974,6 @@ export default function HomePage() {
                   type="button"
                   className={selectedSeason === "verano" ? "active" : ""}
                   onClick={() => handleSeasonChange("verano")}
-                  disabled={readOnly}
                 >
                   <Sun size={13} />
                   Verano
@@ -1004,7 +982,6 @@ export default function HomePage() {
                   type="button"
                   className={selectedSeason === "invierno" ? "active" : ""}
                   onClick={() => handleSeasonChange("invierno")}
-                  disabled={readOnly}
                 >
                   <Snowflake size={13} />
                   Invierno
@@ -1012,7 +989,7 @@ export default function HomePage() {
               </div>
               <p className="season-hint">
                 {activeShare
-                  ? "La temporada la eligió quien compartió esta planificación."
+                  ? "La temporada se guarda en esta planificación compartida."
                   : season.hint}
               </p>
             </div>
@@ -1041,7 +1018,7 @@ export default function HomePage() {
                 <span className="side-kicker">
                   {activeShare ? "Compartida" : "Planificación"}
                 </span>
-                <h2>{activeShare ? "Su semana" : "Tu semana"}</h2>
+                <h2>{activeShare ? "Semana compartida" : "Tu semana"}</h2>
                 <p>
                   {currentPlan
                     ? `${formatWeekRange(weekStart)} · 7 comidas y 7 cenas`
@@ -1091,7 +1068,6 @@ export default function HomePage() {
                             repeatCount={
                               recipeCounts.get(currentPlan.meals[lunchKey]) ?? 0
                             }
-                            readOnly={readOnly}
                             onOpen={() => setModalMeal(lunchKey)}
                             onQuickSwap={() => handleQuickSwap(lunchKey)}
                           />
@@ -1102,7 +1078,6 @@ export default function HomePage() {
                             repeatCount={
                               recipeCounts.get(currentPlan.meals[dinnerKey]) ?? 0
                             }
-                            readOnly={readOnly}
                             onOpen={() => setModalMeal(dinnerKey)}
                             onQuickSwap={() => handleQuickSwap(dinnerKey)}
                           />
@@ -1134,19 +1109,17 @@ export default function HomePage() {
                 <h3>Esta semana está en blanco</h3>
                 <p>
                   {activeShare
-                    ? `${sharedOwner} todavía no ha planificado esta semana.`
+                    ? `${sharedOwner} todavía no ha planificado esta semana. Puedes generarla tú.`
                     : "Genera 14 platos con el reparto equilibrado y la temporada que elijas."}
                 </p>
-                {!activeShare && (
-                  <button
-                    className="btn btn-primary"
-                    type="button"
-                    onClick={requestGenerate}
-                  >
-                    <Sparkles size={16} />
-                    Generar esta semana
-                  </button>
-                )}
+                <button
+                  className="btn btn-primary"
+                  type="button"
+                  onClick={requestGenerate}
+                >
+                  <Sparkles size={16} />
+                  Generar esta semana
+                </button>
               </div>
             )}
           </section>
@@ -1155,7 +1128,6 @@ export default function HomePage() {
             <BalanceCard
               plan={currentPlan}
               recipes={recipes}
-              readOnly={readOnly}
               onRebalance={requestGenerate}
             />
             <ShoppingList plan={currentPlan} recipes={recipes} onToast={notify} />
@@ -1165,11 +1137,11 @@ export default function HomePage() {
               </span>
               <div>
                 <strong>
-                  {activeShare ? "Una semana para inspirarte" : "Cambia el plan, no la calma"}
+                  {activeShare ? "Cocina a cuatro manos" : "Cambia el plan, no la calma"}
                 </strong>
                 <p>
                   {activeShare
-                    ? "Puedes consultar los platos y la lista de la compra, pero solo la persona que comparte puede cambiar su planificación."
+                    ? `Puedes cambiar los platos y la temporada; los cambios se guardan en la planificación de ${sharedOwner}. El recetario es común para todas las cuentas.`
                     : "Toca cualquier plato para cambiarlo, repetirlo por sobras o moverlo a otro día. En el recetario puedes editar ingredientes y añadir tus propias recetas."}
                 </p>
               </div>
@@ -1184,10 +1156,10 @@ export default function HomePage() {
       </main>
 
       <MealModal
-        open={!readOnly && Boolean(modalMeal)}
+        open={Boolean(modalMeal)}
         mealKey={modalMeal}
         plan={currentPlan ?? null}
-        plans={plans}
+        plans={activePlans}
         recipes={recipes}
         seasonMode={currentPlan?.seasonMode ?? selectedSeason}
         onClose={closeMealModal}
@@ -1200,7 +1172,7 @@ export default function HomePage() {
         open={managerOpen}
         recipes={recipes}
         book={recipeBook}
-        plans={plans}
+        plans={activePlans}
         mode={mode}
         error={recipeError}
         onClose={closeManager}
@@ -1222,7 +1194,11 @@ export default function HomePage() {
       <ConfirmDialog
         open={confirmOpen}
         title="¿Regenerar la semana?"
-        description="Se elegirán 14 platos nuevos y se perderán los cambios manuales de esta semana. La lista de la compra también se actualizará."
+        description={
+          activeShare
+            ? `Se elegirán 14 platos nuevos y se perderán los cambios manuales de esta semana en la planificación de ${sharedOwner}. La lista de la compra también se actualizará.`
+            : "Se elegirán 14 platos nuevos y se perderán los cambios manuales de esta semana. La lista de la compra también se actualizará."
+        }
         confirmLabel="Regenerar"
         icon={<RefreshCw size={22} />}
         onConfirm={() => {

@@ -33,7 +33,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Planner functions and UI components accept an optional `recipes` argument/prop that defaults to `RECIPES`. Thread the effective catalog through when adding features: `findRecipe(catalog, id)`, `generateWeekPlan(..., catalog)`, `getPlanStats(plan, catalog)`, `buildShoppingList(plan, catalog)`, `getPlanRecipe(plan, key, catalog)`, and the `recipes` prop of `MealModal` / `BalanceCard` / `ShoppingList`. Importing `RECIPES`/`getRecipe` directly silently ignores global recipes and edits.
 - Base recipes are declared with the local `r(...)` helper in `lib/recipes.ts`; ingredients are `"name|section"` strings (section defaults to `despensa`). Follow that pattern when adding base recipes.
 - Base-recipe edits go to `overrides` keyed by base id; deleting a base recipe adds it to `hiddenIds` (soft hide, restorable). User recipes use `custom-...` ids.
-- Deleting a recipe also clears its slots from the current account's stored plans (`handleDeleteRecipe` in `app/page.tsx`); preserve that side effect. Other accounts' plans cannot be edited from the client under RLS and may keep a now-missing recipe id.
+- Deleting a recipe also clears its slots from the plan currently in view, own or shared (`handleDeleteRecipe` in `app/page.tsx`); preserve that side effect. Plans of other accounts that are not being viewed may keep a now-missing recipe id.
 
 ## Domain rules that look like bugs but are intentional
 
@@ -43,16 +43,18 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Persistence / Supabase
 
-- Tables: `weekly_plans` (one set of weeks per `auth.uid()`), `plan_shares` (owner/viewer read access) and `recipe_catalog` (single global row). Schema lives only in `supabase/schema.sql`; it is idempotent and applied by hand in the Supabase SQL Editor. No migration tooling is configured.
+- Tables: `weekly_plans` (one set of weeks per `auth.uid()`), `plan_shares` (owner/viewer edit access) and `recipe_catalog` (single global row). Schema lives only in `supabase/schema.sql`; it is idempotent and applied by hand in the Supabase SQL Editor. No migration tooling is configured.
 - Email/password auth is required when Supabase is configured. Enable the Email provider; anonymous sign-ins are not used. Email confirmation may be on, so `signUpWithEmail` can return a user without a session.
 - Local plans keys: `mesa.week-plans.v2.<userId>` (or `mesa.week-plans.v2.local` without Supabase). The global recipe cache is `mesa.recipe-catalog.v2`, with the old `mesa.recipe-book.v1` read as a fallback. If you change stored shapes, update `normalizeRecipeBook` / `normalizeRecipe` in `lib/recipe-book.ts`; recipes missing an id, name, valid category, or at least one ingredient are dropped on load.
 - Recipe-catalog sync merges local/cloud by `updatedAt` (`loadRecipeBook` in `lib/storage.ts`). Because the catalog is global, last-write-wins across accounts is accepted. Keep timestamps ISO-comparable when adding fields.
-- Keep the initial `loadPlans()` and `loadRecipeBook()` calls sequential on purpose (`initializeUser` / `initializeLocal` in `app/page.tsx`). Do not auto-generate a week while viewing a shared plan; generation is own-account only.
-- `plan_shares` grants read-only access to all of an owner's weeks through the `weekly_plans` SELECT policy. Only the owner can insert/update/delete weeks. The `share_plan_with_email` security-definer RPC resolves the viewer email in `auth.users`; do not add a broad profile/email SELECT policy just to share.
-- Sharing is by registered account email. The shared view is read-only in the UI: guard every plan mutation with `readOnly`/`activeShare`, but keep the global recipe manager available.
+- Keep the initial `loadPlans()` and `loadRecipeBook()` calls sequential on purpose (`initializeUser` / `initializeLocal` in `app/page.tsx`). Do not auto-generate a week while viewing a shared plan; generation is allowed only on explicit user action.
+- `plan_shares` grants read **and write** access to all of an owner's weeks through the `weekly_plans` INSERT/UPDATE policies. Shared users are collaborators: they can change meals, seasons and generate weeks, but cannot delete weeks or change `user_id`. Only the owner can manage shares. The `share_plan_with_email` security-definer RPC resolves the viewer email in `auth.users`; do not add a broad profile/email SELECT policy just to share.
+- Sharing is by registered account email. When persisting a shared plan, save it with `activeShare.ownerId` (not the signed-in user's id) and update `sharedPlans`; `persist` in `app/page.tsx` handles both. Keep the global recipe manager available in shared view.
 - Auth sessions live in browser storage. Clearing site data signs the user out. Use a fresh browser context for clean manual tests with two accounts.
 - `.env.local` holds real project values: never print, commit, or delete it. `.env.example` is the committed template.
 
 ## Styling
 
 - Plain CSS in `app/globals.css` (no Tailwind, CSS modules, or styled-components).
+- Mobile support lives in the `@media (max-width: …)` blocks: the layout must stay usable at 320–390 px. The main planner scrolls horizontally by design; never let the page itself scroll sideways.
+- Mobile rules intentionally set form controls to `font-size: 16px` (prevents iOS auto-zoom) and keep touch targets around 32–44 px. Modals become bottom sheets sized in `dvh` with `env(safe-area-inset-bottom)` padding.
