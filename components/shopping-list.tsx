@@ -2,6 +2,7 @@
 
 import { Check, Copy, ShoppingBasket } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { getAllRecipeIds } from "@/lib/meals";
 import { buildShoppingList, buildShoppingListText } from "@/lib/planner";
 import type { Recipe, WeekPlan } from "@/lib/types";
 
@@ -23,7 +24,7 @@ export function ShoppingList({ plan, recipes, onToast }: ShoppingListProps) {
   );
   const repeated = useMemo(() => {
     if (!plan) return 0;
-    const ids = Object.values(plan.meals).filter(Boolean);
+    const ids = getAllRecipeIds(plan.meals);
     return ids.length - new Set(ids).size;
   }, [plan]);
 

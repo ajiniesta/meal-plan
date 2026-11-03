@@ -1,4 +1,5 @@
 import { addDaysISO, getSeasonContext } from "./dates";
+import { getAllRecipeIds } from "./meals";
 import {
   CATEGORIES,
   CATEGORY_ORDER,
@@ -100,9 +101,9 @@ export function getRecentRecipeIds(
   for (const plan of plans) {
     if (plan.weekStart >= weekStart) continue;
     if (plan.weekStart < from) continue;
-    Object.values(plan.meals).forEach((id) => {
+    for (const id of getAllRecipeIds(plan.meals)) {
       if (id) ids.add(id);
-    });
+    }
   }
 
   return ids;
@@ -115,31 +116,24 @@ interface PickOptions {
   recentIds: Set<string>;
   climate: "verano" | "invierno" | "templado";
   excludeId?: string;
+  excludeIds?: Set<string>;
   recipes?: Recipe[];
 }
 
-export function pickRecipeForSlot({
-  requirement,
-  mealType,
-  usedIds,
-  recentIds,
-  climate,
-  excludeId,
-  recipes = RECIPES,
-}: PickOptions): Recipe | undefined {
-  const base = recipes.filter(
-    (recipe) =>
-      recipe.category === requirement.category &&
-      (!requirement.fishKind || recipe.fishKind === requirement.fishKind) &&
-      recipe.mealSlots.includes(mealType) &&
-      recipe.id !== excludeId,
-  );
+interface ExtraPickOptions {
+  mealType: MealType;
+  usedIds: Set<string>;
+  recentIds: Set<string>;
+  climate: "verano" | "invierno" | "templado";
+  excludeIds?: Set<string>;
+  recipes?: Recipe[];
+}
 
-  const available = base.filter((recipe) => !usedIds.has(recipe.id));
-  const pool = available.length > 0 ? available : base;
-
-  if (pool.length === 0) return undefined;
-
+function pickScoredRecipe(
+  pool: Recipe[],
+  recentIds: Set<string>,
+  climate: "verano" | "invierno" | "templado",
+): Recipe {
   const scored = pool.map((recipe) => {
     let score = seasonScore(recipe, climate) * 2;
     score += recentIds.has(recipe.id) ? -16 : 5;
@@ -156,6 +150,56 @@ export function pickRecipeForSlot({
   );
 }
 
+export function pickRecipeForSlot({
+  requirement,
+  mealType,
+  usedIds,
+  recentIds,
+  climate,
+  excludeId,
+  excludeIds,
+  recipes = RECIPES,
+}: PickOptions): Recipe | undefined {
+  const base = recipes.filter(
+    (recipe) =>
+      recipe.category === requirement.category &&
+      (!requirement.fishKind || recipe.fishKind === requirement.fishKind) &&
+      recipe.mealSlots.includes(mealType) &&
+      recipe.id !== excludeId &&
+      !excludeIds?.has(recipe.id),
+  );
+
+  const available = base.filter((recipe) => !usedIds.has(recipe.id));
+  const pool = available.length > 0 ? available : base;
+
+  if (pool.length === 0) return undefined;
+
+  return pickScoredRecipe(pool, recentIds, climate);
+}
+
+/** Elige un plato de cualquier categoría para añadir como segundo plato. */
+export function pickExtraRecipeForSlot({
+  mealType,
+  usedIds,
+  recentIds,
+  climate,
+  excludeIds,
+  recipes = RECIPES,
+}: ExtraPickOptions): Recipe | undefined {
+  const base = recipes.filter(
+    (recipe) =>
+      recipe.mealSlots.includes(mealType) &&
+      !excludeIds?.has(recipe.id),
+  );
+
+  const available = base.filter((recipe) => !usedIds.has(recipe.id));
+  const pool = available.length > 0 ? available : base;
+
+  if (pool.length === 0) return undefined;
+
+  return pickScoredRecipe(pool, recentIds, climate);
+}
+
 export function generateWeekPlan(
   weekStart: string,
   seasonMode: SeasonMode,
@@ -165,7 +209,7 @@ export function generateWeekPlan(
   const season = getSeasonContext(weekStart, seasonMode);
   const recentIds = getRecentRecipeIds(historyPlans, weekStart);
   const usedIds = new Set<string>();
-  const meals: Record<string, string> = {};
+  const meals: Record<string, string[]> = {};
 
   const lunches = shuffle(LUNCH_REQUIREMENTS);
   const dinners = shuffle(DINNER_REQUIREMENTS);
@@ -184,7 +228,7 @@ export function generateWeekPlan(
     });
 
     if (lunch) {
-      meals[`${day.id}-comida`] = lunch.id;
+      meals[`${day.id}-comida`] = [lunch.id];
       usedIds.add(lunch.id);
     }
 
@@ -198,7 +242,7 @@ export function generateWeekPlan(
     });
 
     if (dinner) {
-      meals[`${day.id}-cena`] = dinner.id;
+      meals[`${day.id}-cena`] = [dinner.id];
       usedIds.add(dinner.id);
     }
   });
@@ -214,12 +258,23 @@ export function generateWeekPlan(
   };
 }
 
+export function getPlanRecipes(
+  plan: WeekPlan,
+  mealKey: MealKey,
+  recipes: Recipe[] = RECIPES,
+): Recipe[] {
+  return (plan.meals[mealKey] ?? []).flatMap((recipeId) => {
+    const recipe = findRecipe(recipes, recipeId);
+    return recipe ? [recipe] : [];
+  });
+}
+
 export function getPlanRecipe(
   plan: WeekPlan,
   mealKey: MealKey,
   recipes: Recipe[] = RECIPES,
 ): Recipe | undefined {
-  return findRecipe(recipes, plan.meals[mealKey]);
+  return getPlanRecipes(plan, mealKey, recipes)[0];
 }
 
 export function getPlanStats(plan: WeekPlan, recipes: Recipe[] = RECIPES): PlanStats {
@@ -239,8 +294,10 @@ export function getPlanStats(plan: WeekPlan, recipes: Recipe[] = RECIPES): PlanS
 
   let total = 0;
 
-  for (const recipeId of Object.values(plan.meals)) {
-    const recipe = findRecipe(recipes, recipeId);
+  // Solo el primer plato de cada hueco cuenta para el equilibrio semanal.
+  // El segundo plato es opcional y se suma únicamente a la lista de la compra.
+  for (const recipeIds of Object.values(plan.meals)) {
+    const recipe = findRecipe(recipes, recipeIds[0]);
     if (!recipe) continue;
     total += 1;
     byCategory[recipe.category] += 1;
@@ -265,16 +322,16 @@ export function getPlanAlternatives(
   recipe: Recipe,
   recipes: Recipe[] = RECIPES,
 ): Recipe[] {
-  const currentId = plan.meals[mealKey];
+  const currentIds = new Set(plan.meals[mealKey] ?? []);
   const used = new Set(
     Object.entries(plan.meals)
-      .filter(([key, value]) => key !== mealKey && Boolean(value))
-      .map(([, value]) => value),
+      .filter(([key]) => key !== mealKey)
+      .flatMap(([, ids]) => ids),
   );
 
   return recipes.filter(
     (candidate) =>
-      candidate.id !== currentId &&
+      !currentIds.has(candidate.id) &&
       candidate.category === recipe.category &&
       candidate.mealSlots.includes(mealKey.endsWith("-comida") ? "comida" : "cena") &&
       (!recipe.fishKind || candidate.fishKind === recipe.fishKind),
@@ -299,7 +356,7 @@ export function buildShoppingList(
     { name: string; section: IngredientSection; count: number; recipes: Set<string> }
   >();
 
-  for (const recipeId of new Set(Object.values(plan.meals))) {
+  for (const recipeId of new Set(getAllRecipeIds(plan.meals))) {
     const recipe = findRecipe(recipes, recipeId);
     if (!recipe) continue;
 
@@ -358,14 +415,18 @@ export function getCompatibleRecipesForSlot(
   recipes: Recipe[] = RECIPES,
 ): Recipe[] {
   const mealType: MealType = mealKey.endsWith("-comida") ? "comida" : "cena";
+  const currentIds = new Set(plan.meals[mealKey] ?? []);
   const used = new Set(
     Object.entries(plan.meals)
       .filter(([key]) => key !== mealKey)
-      .map(([, value]) => value),
+      .flatMap(([, ids]) => ids),
   );
 
   return recipes.filter(
-    (recipe) => recipe.mealSlots.includes(mealType) && !used.has(recipe.id),
+    (recipe) =>
+      recipe.mealSlots.includes(mealType) &&
+      !used.has(recipe.id) &&
+      !currentIds.has(recipe.id),
   );
 }
 

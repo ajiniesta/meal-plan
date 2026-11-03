@@ -1,6 +1,7 @@
 "use client";
 
 import { CheckCircle2, Fish, RefreshCw, Sparkles } from "lucide-react";
+import { getAllRecipeIds } from "@/lib/meals";
 import { CATEGORIES, CATEGORY_ORDER } from "@/lib/recipes";
 import { TARGETS, getPlanStats } from "@/lib/planner";
 import type { Recipe, WeekPlan } from "@/lib/types";
@@ -13,8 +14,12 @@ interface BalanceCardProps {
 
 export function BalanceCard({ plan, recipes, onRebalance }: BalanceCardProps) {
   const stats = plan ? getPlanStats(plan, recipes) : null;
-  const unique = plan ? new Set(Object.values(plan.meals).filter(Boolean)).size : 0;
-  const repeated = (stats?.total ?? 0) - unique;
+  const allRecipeIds = plan ? getAllRecipeIds(plan.meals) : [];
+  const unique = new Set(allRecipeIds).size;
+  const repeated = allRecipeIds.length - unique;
+  const hasExtras = plan
+    ? Object.values(plan.meals).some((recipeIds) => recipeIds.length > 1)
+    : false;
   const fishOk = stats?.fish.blanco === 1 && stats?.fish.azul === 1;
 
   return (
@@ -32,6 +37,13 @@ export function BalanceCard({ plan, recipes, onRebalance }: BalanceCardProps) {
           ? "La semana cumple el reparto que buscabas."
           : "La proporción ideal para 7 comidas y 7 cenas."}
       </p>
+
+      {hasExtras && (
+        <p className="balance-extra-note">
+          El primer plato de cada hueco marca el equilibrio; los segundos platos se
+          suman a la lista de la compra.
+        </p>
+      )}
 
       <div className="balance-list">
         {CATEGORY_ORDER.map((category) => {
@@ -88,7 +100,7 @@ export function BalanceCard({ plan, recipes, onRebalance }: BalanceCardProps) {
           <span>
             {unique === 0
               ? "Aún no hay platos"
-              : unique === stats?.total
+              : repeated === 0
                 ? `${unique} platos distintos`
                 : `${unique} platos · ${repeated} repetido${repeated === 1 ? "" : "s"}`}
           </span>

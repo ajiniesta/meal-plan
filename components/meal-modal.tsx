@@ -5,10 +5,12 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Plus,
   Repeat2,
   Search,
   Shuffle,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -19,6 +21,7 @@ import {
   findRecipe,
 } from "@/lib/recipes";
 import { getSeasonContext } from "@/lib/dates";
+import { MAX_DISHES_PER_MEAL } from "@/lib/meals";
 import {
   ALL_MEAL_KEYS,
   getRecentRecipeIds,
@@ -30,14 +33,20 @@ import type { MealKey, Recipe, SeasonMode, WeekPlan } from "@/lib/types";
 interface MealModalProps {
   open: boolean;
   mealKey: MealKey | null;
+  dishIndex: number | "new" | null;
   plan: WeekPlan | null;
   plans: WeekPlan[];
   recipes: Recipe[];
   seasonMode: SeasonMode;
   onClose: () => void;
-  onSelect: (mealKey: MealKey, recipeId: string) => void;
+  onSelect: (
+    mealKey: MealKey,
+    recipeId: string,
+    dishIndex: number | "new",
+  ) => void;
+  onRemove: (mealKey: MealKey, dishIndex: number) => void;
   onSwap: (from: MealKey, to: MealKey) => void;
-  onSuggest: (mealKey: MealKey) => void;
+  onSuggest: (mealKey: MealKey, dishIndex: number | "new") => void;
 }
 
 type Tab = "alternativas" | "repetir" | "intercambiar";
@@ -46,12 +55,14 @@ type Scope = "same" | "all";
 export function MealModal({
   open,
   mealKey,
+  dishIndex,
   plan,
   plans,
   recipes,
   seasonMode,
   onClose,
   onSelect,
+  onRemove,
   onSwap,
   onSuggest,
 }: MealModalProps) {
@@ -59,15 +70,26 @@ export function MealModal({
   const [scope, setScope] = useState<Scope>("same");
   const [search, setSearch] = useState("");
 
+  const isAdding = dishIndex === "new";
+  const targetIndex = typeof dishIndex === "number" ? dishIndex : null;
+  const slotRecipeIds = plan && mealKey ? plan.meals[mealKey] ?? [] : [];
+
   const currentRecipe =
-    plan && mealKey ? findRecipe(recipes, plan.meals[mealKey]) : undefined;
+    plan && mealKey && targetIndex !== null
+      ? findRecipe(recipes, slotRecipeIds[targetIndex])
+      : undefined;
+
+  const otherRecipes = slotRecipeIds
+    .filter((_, index) => index !== targetIndex)
+    .map((recipeId) => findRecipe(recipes, recipeId))
+    .filter((recipe): recipe is Recipe => Boolean(recipe));
 
   useEffect(() => {
     if (!open) return;
     setTab("alternativas");
-    setScope("same");
+    setScope(isAdding ? "all" : "same");
     setSearch("");
-  }, [open, mealKey]);
+  }, [open, mealKey, dishIndex, isAdding]);
 
   useEffect(() => {
     if (!open) return;
@@ -91,9 +113,11 @@ export function MealModal({
     const counts = new Map<string, number>();
     if (!plan || !mealKey) return counts;
 
-    for (const [key, recipeId] of Object.entries(plan.meals)) {
-      if (key === mealKey || !recipeId) continue;
-      counts.set(recipeId, (counts.get(recipeId) ?? 0) + 1);
+    for (const [key, recipeIds] of Object.entries(plan.meals)) {
+      if (key === mealKey) continue;
+      for (const recipeId of recipeIds) {
+        counts.set(recipeId, (counts.get(recipeId) ?? 0) + 1);
+      }
     }
 
     return counts;
@@ -105,10 +129,11 @@ export function MealModal({
     const recent = getRecentRecipeIds(plans, plan.weekStart);
     const season = getSeasonContext(plan.weekStart, seasonMode);
     const normalizedSearch = search.trim().toLocaleLowerCase("es");
+    const excludedIds = new Set(slotRecipeIds);
 
     return recipes
       .filter((recipe) => {
-        if (recipe.id === currentRecipe?.id) return false;
+        if (excludedIds.has(recipe.id)) return false;
         if (!recipe.mealSlots.includes(mealType)) return false;
         if (scope === "same" && currentRecipe && recipe.category !== currentRecipe.category) {
           return false;
@@ -150,6 +175,7 @@ export function MealModal({
     mealType,
     seasonMode,
     usedCounts,
+    slotRecipeIds,
   ]);
 
   const repeatCandidates = useMemo(() => {
@@ -162,19 +188,23 @@ export function MealModal({
 
     for (const key of ALL_MEAL_KEYS) {
       if (key === mealKey) continue;
-      const recipe = findRecipe(recipes, plan.meals[key]);
-      if (!recipe) continue;
 
-      const [dayId, slotType] = key.split("-");
-      const day = DAYS.find((item) => item.id === dayId);
-      const entry = grouped.get(recipe.id) ?? {
-        recipe,
-        count: 0,
-        slots: [],
-      };
-      entry.count += 1;
-      entry.slots.push(`${day?.short ?? dayId} ${slotType}`);
-      grouped.set(recipe.id, entry);
+      for (const recipeId of plan.meals[key] ?? []) {
+        if (slotRecipeIds.includes(recipeId)) continue;
+        const recipe = findRecipe(recipes, recipeId);
+        if (!recipe) continue;
+
+        const [dayId, slotType] = key.split("-");
+        const day = DAYS.find((item) => item.id === dayId);
+        const entry = grouped.get(recipe.id) ?? {
+          recipe,
+          count: 0,
+          slots: [],
+        };
+        entry.count += 1;
+        entry.slots.push(`${day?.short ?? dayId} ${slotType}`);
+        grouped.set(recipe.id, entry);
+      }
     }
 
     return [...grouped.values()].sort(
@@ -182,15 +212,30 @@ export function MealModal({
         right.count - left.count ||
         left.recipe.name.localeCompare(right.recipe.name, "es"),
     );
-  }, [plan, mealKey, recipes]);
+  }, [plan, mealKey, recipes, slotRecipeIds]);
 
-  if (!open || !mealKey || !plan) return null;
+  if (!open || !mealKey || !plan || dishIndex === null) return null;
 
   const currentMeta = currentRecipe ? CATEGORIES[currentRecipe.category] : null;
   const season = getSeasonContext(plan.weekStart, seasonMode);
+  const slotNames = slotRecipeIds
+    .map((recipeId) => findRecipe(recipes, recipeId)?.name)
+    .filter((name): name is string => Boolean(name));
+  const headerTitle = isAdding
+    ? slotRecipeIds.length > 0
+      ? "Añade un segundo plato"
+      : "Elige un plato"
+    : currentRecipe?.name ?? "Elige un plato";
+  const dishLabel = isAdding
+    ? " · segundo plato"
+    : targetIndex === 1
+      ? " · segundo plato"
+      : slotRecipeIds.length > 1
+        ? " · plato principal"
+        : "";
 
   const handleSelect = (recipe: Recipe) => {
-    onSelect(mealKey, recipe.id);
+    onSelect(mealKey, recipe.id, dishIndex);
     onClose();
   };
 
@@ -201,7 +246,13 @@ export function MealModal({
   };
 
   const handleSuggest = () => {
-    onSuggest(mealKey);
+    onSuggest(mealKey, dishIndex);
+    onClose();
+  };
+
+  const handleRemove = () => {
+    if (targetIndex === null) return;
+    onRemove(mealKey, targetIndex);
     onClose();
   };
 
@@ -233,8 +284,11 @@ export function MealModal({
               {currentRecipe?.emoji ?? "＋"}
             </div>
             <div className="modal-head-copy">
-              <span className="modal-eyebrow">{mealKeyLabel(mealKey)}</span>
-              <h2>{currentRecipe?.name ?? "Elige un plato"}</h2>
+              <span className="modal-eyebrow">
+                {mealKeyLabel(mealKey)}
+                {dishLabel}
+              </span>
+              <h2>{headerTitle}</h2>
               <div className="modal-badges">
                 {currentMeta && (
                   <span
@@ -263,6 +317,28 @@ export function MealModal({
         </header>
 
         <div className="modal-body">
+          <div className="modal-dish-bar">
+            <span className="modal-dish-context">
+              {isAdding
+                ? slotRecipeIds.length > 0
+                  ? `Se añadirá junto a ${slotNames.join(" y ")}.`
+                  : "Elige el primer plato de este hueco."
+                : otherRecipes.length > 0
+                  ? `También en este hueco: ${otherRecipes.map((recipe) => recipe.name).join(" y ")}.`
+                  : "Este hueco solo tiene este plato."}
+            </span>
+            {!isAdding && (
+              <button
+                type="button"
+                className="text-button modal-remove-dish"
+                onClick={handleRemove}
+              >
+                <Trash2 size={13} />
+                Quitar plato
+              </button>
+            )}
+          </div>
+
           {currentRecipe && (
             <details className="ingredients-details">
               <summary>
@@ -288,8 +364,8 @@ export function MealModal({
               className={tab === "alternativas" ? "active" : ""}
               onClick={() => setTab("alternativas")}
             >
-              <Sparkles size={15} />
-              Cambiar plato
+              {isAdding ? <Plus size={15} /> : <Sparkles size={15} />}
+              {isAdding ? "Añadir plato" : "Cambiar plato"}
             </button>
             <button
               type="button"
@@ -420,8 +496,9 @@ export function MealModal({
                 <div>
                   <strong>Repite un plato de esta semana</strong>
                   <p>
-                    Perfecto para sobras o para repetir algo que os gusta. La compra no se
-                    duplica: los ingredientes del plato ya están en la lista.
+                    {isAdding
+                      ? "Se añadirá como segundo plato a este hueco. La compra no se duplica: los ingredientes del plato ya están en la lista."
+                      : "Perfecto para sobras o para repetir algo que os gusta. La compra no se duplica: los ingredientes del plato ya están en la lista."}
                   </p>
                 </div>
               </div>
@@ -476,17 +553,19 @@ export function MealModal({
                   <ArrowLeftRight size={18} />
                 </span>
                 <div>
-                  <strong>Mueve el plato a otro hueco</strong>
+                  <strong>Mueve los platos a otro hueco</strong>
                   <p>
-                    Elige otro día o comida para intercambiar los dos platos. El equilibrio
-                    semanal se mantiene.
+                    Elige otro día o comida para intercambiar el contenido de los dos
+                    huecos. El equilibrio semanal se mantiene.
                   </p>
                 </div>
               </div>
 
               <div className="swap-grid">
                 {ALL_MEAL_KEYS.map((targetKey) => {
-                  const targetRecipe = findRecipe(recipes, plan.meals[targetKey]);
+                  const targetRecipes = (plan.meals[targetKey] ?? [])
+                    .map((recipeId) => findRecipe(recipes, recipeId))
+                    .filter((recipe): recipe is Recipe => Boolean(recipe));
                   const [dayId, targetType] = targetKey.split("-");
                   const day = DAYS.find((item) => item.id === dayId);
                   const isCurrent = targetKey === mealKey;
@@ -504,7 +583,9 @@ export function MealModal({
                         {day?.short} · {isComida ? "comida" : "cena"}
                       </span>
                       <span className="swap-slot-name">
-                        {targetRecipe?.name ?? "Sin planificar"}
+                        {targetRecipes.length > 0
+                          ? targetRecipes.map((recipe) => recipe.name).join(" + ")
+                          : "Sin planificar"}
                       </span>
                       {isCurrent ? (
                         <span className="swap-current-tag">

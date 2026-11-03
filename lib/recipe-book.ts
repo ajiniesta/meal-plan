@@ -169,10 +169,18 @@ export function createCustomRecipeId(): string {
   return `custom-${random}`;
 }
 
-export function countRecipeUsage(plans: { meals: Record<string, string> }[], id: string): number {
+export function countRecipeUsage(
+  plans: { meals: Record<string, string[]> }[],
+  id: string,
+): number {
   return plans.reduce(
     (total, plan) =>
-      total + Object.values(plan.meals).filter((recipeId) => recipeId === id).length,
+      total +
+      Object.values(plan.meals).reduce(
+        (sum, recipeIds) =>
+          sum + recipeIds.filter((recipeId) => recipeId === id).length,
+        0,
+      ),
     0,
   );
 }

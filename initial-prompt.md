@@ -13,6 +13,8 @@ Quiero que los colaboradores del plan puedan editar el plan de comidas.
 
 También debe de ser capaz de ser usable desde el móvil.
 
+Quiero permitir que en la comida o en la cena se puedan poner dos platos, como por ejemplo "Crema de Calabacín" y "Filetes de Pollo", o "Sopa" y "Chistorra", o "Sandwiches de Atun con mayonesa" y "Nachos con Guacamole".
+
 # Alimentos
 
 Los tipos de alimentos y alimentos van a ser estos inicialmente.

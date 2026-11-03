@@ -17,6 +17,7 @@ Aplicación para generar y ajustar una semana de 7 comidas y 7 cenas. Está cons
 - Catálogo inicial de más de 90 recetas, con ingredientes, temporada y tipo de pescado.
 - Recetario editable: añade recetas propias, cambia nombre, categoría, temporada, huecos e ingredientes, o retira platos base.
 - Cambio de plato individual, sugerencia aleatoria, búsqueda de alternativas e intercambio entre días.
+- Segundo plato opcional en cada comida o cena: por ejemplo, una crema y un plato de carne. El principal marca el equilibrio y los dos suman a la compra.
 - Repetición de platos dentro de la misma semana, pensada para sobras o para repetir algo que gusta.
 - Lista de la compra agregada por secciones, con ingredientes compartidos contados una sola vez y opción de copiarla.
 - Temporada automática según el mes, o forzada a verano/invierno.
@@ -92,6 +93,7 @@ components/
 lib/
   recipes.ts          Catálogo base de recetas y metadatos
   recipe-book.ts      Recetas propias, ediciones y catálogo efectivo
+  meals.ts            Normalización y utilidades de los platos por hueco
   planner.ts          Generación, cuotas, estadísticas y compra
   dates.ts            Semanas, fechas y temporada
   storage.ts          Persistencia local + Supabase (semanas, recetario y accesos)
@@ -110,7 +112,9 @@ La semana se construye a partir de dos plantillas que se barajan entre los días
 
 El generador puntúa cada receta por temporada, si se ha usado en las últimas tres semanas y si encaja con el hueco. Al generar, evita repetir platos dentro de la misma semana; si el recetario no tiene suficientes opciones, reutiliza las que haya. Después puedes repetir cualquier plato manualmente desde la pestaña **Repetir**. Al cambiar o repetir un plato, el equilibrio puede variar; la tarjeta de equilibrio lo muestra en tiempo real.
 
-Los platos repetidos cuentan para el equilibrio (son dos comidas), pero sus ingredientes aparecen una sola vez en la lista de la compra, pensando en sobras. Los datos locales se guardan por cuenta en `mesa.week-plans.v2.<id>` y el recetario global en `mesa.recipe-catalog.v2`; en modo local sin Supabase se usa `mesa.week-plans.v2.local`.
+Cada comida o cena admite un segundo plato opcional. El generador sigue creando un plato por hueco; el segundo se añade a mano desde la tarjeta. El primer plato es el principal y marca el equilibrio semanal; el segundo solo suma a la lista de la compra. Los platos repetidos cuentan para el equilibrio (son dos comidas), pero sus ingredientes aparecen una sola vez en la lista de la compra, pensando en sobras.
+
+Los datos locales se guardan por cuenta en `mesa.week-plans.v2.<id>` y el recetario global en `mesa.recipe-catalog.v2`; en modo local sin Supabase se usa `mesa.week-plans.v2.local`. Los planes antiguos con un único id por hueco se migran automáticamente al cargar.
 
 ## Compartir la planificación
 
@@ -122,6 +126,35 @@ Los platos repetidos cuentan para el equilibrio (son dos comidas), pero sus ingr
 - La función `share_plan_with_email` resuelve el correo en `auth.users` sin exponer el listado de cuentas al cliente.
 - El recetario no se comparte: directamente es global. Cualquier cuenta autenticada puede crear, editar o retirar recetas para todas.
 
-## Despliegue
+## Despliegue en Vercel
 
-El proyecto se puede desplegar en Vercel. Añade `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY` en las variables de entorno del proyecto y despliega. No hay claves privadas ni service role en el cliente.
+La app es una única página estática, así que Vercel la detecta como proyecto Next.js sin configuración extra: no hacen falta `vercel.json`, rutas de API ni funciones serverless. No hay claves privadas ni service role en el cliente; solo se usan variables `NEXT_PUBLIC_*`.
+
+### Desde el panel de Vercel (recomendado)
+
+1. Sube el repo a GitHub (ya está en `origin/main`) y entra en [vercel.com/new](https://vercel.com/new).
+2. Importa el repositorio `ajiniesta/meal-plan`. Deja el framework en **Next.js** y los comandos por defecto (`npm run build`).
+3. En **Environment Variables** añade las mismas variables de tu `.env.local`:
+   - `NEXT_PUBLIC_SUPABASE_URL` → `https://tu-proyecto.supabase.co`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` → la anon key (o `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` con la publishable key)
+   - Márcalas para **Production**, **Preview** y **Development**.
+4. Pulsa **Deploy**. Cada push a `main` vuelve a desplegar; el resto de ramas generan un preview.
+5. En Supabase, ve a **Authentication → URL Configuration** y añade el dominio de producción (y los previews si los usas) en **Redirect URLs**; ajusta también **Site URL** al dominio final. Si falta, los enlaces de confirmación de correo vuelven a `localhost`.
+
+### Desde la terminal
+
+```bash
+npm i -g vercel   # o: npx vercel
+vercel login
+vercel            # primer despliegue de preview, enlaza el proyecto
+vercel --prod     # despliegue a producción
+```
+
+Las variables `NEXT_PUBLIC_*` se pueden añadir con `vercel env add` o desde el panel. Si cambias una variable, hay que volver a desplegar para que se incruste en el bundle.
+
+### Comprobaciones tras el despliegue
+
+- Sin variables de Supabase la app arranca en modo local sin cuentas; con ellas debe mostrar la pantalla de acceso.
+- Registro y confirmación por correo funcionan contra el dominio de producción (revisa Redirect URLs).
+- Crear una semana, recargar y comprobar que persiste en `weekly_plans`.
+- Compartir con otra cuenta y verificar que el colaborador puede editar.

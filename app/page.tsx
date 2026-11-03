@@ -46,11 +46,17 @@ import {
   toISODate,
 } from "@/lib/dates";
 import {
+  MAX_DISHES_PER_MEAL,
+  countPlanRecipes,
+  getAllRecipeIds,
+} from "@/lib/meals";
+import {
   buildShoppingList,
   generateWeekPlan,
-  getPlanRecipe,
+  getPlanRecipes,
   getPlanStats,
   getRecentRecipeIds,
+  pickExtraRecipeForSlot,
   pickRecipeForSlot,
 } from "@/lib/planner";
 import { RECIPES_BY_ID, findRecipe } from "@/lib/recipes";
@@ -130,6 +136,7 @@ export default function HomePage() {
   const [viewLoading, setViewLoading] = useState(false);
   const [selectedSeason, setSelectedSeason] = useState<SeasonMode>("auto");
   const [modalMeal, setModalMeal] = useState<MealKey | null>(null);
+  const [modalDish, setModalDish] = useState<number | "new">(0);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
@@ -147,6 +154,13 @@ export default function HomePage() {
     setToast({ id: Date.now(), message });
   }, []);
 
+  const openMealModal = useCallback(
+    (mealKey: MealKey, dishIndex: number | "new" = 0) => {
+      setModalMeal(mealKey);
+      setModalDish(dishIndex);
+    },
+    [],
+  );
   const closeMealModal = useCallback(() => setModalMeal(null), []);
   const closeConfirm = useCallback(() => setConfirmOpen(false), []);
   const closeInfo = useCallback(() => setInfoOpen(false), []);
@@ -349,22 +363,15 @@ export default function HomePage() {
     [currentPlan, recipes],
   );
 
-  const recipeCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    if (!currentPlan) return counts;
-
-    for (const recipeId of Object.values(currentPlan.meals)) {
-      if (!recipeId) continue;
-      counts.set(recipeId, (counts.get(recipeId) ?? 0) + 1);
-    }
-
-    return counts;
-  }, [currentPlan]);
+  const recipeCounts = useMemo(
+    () => (currentPlan ? countPlanRecipes(currentPlan.meals) : new Map<string, number>()),
+    [currentPlan],
+  );
 
   const uniqueDishes = useMemo(
     () =>
       currentPlan
-        ? new Set(Object.values(currentPlan.meals).filter(Boolean)).size
+        ? new Set(getAllRecipeIds(currentPlan.meals)).size
         : 0,
     [currentPlan],
   );
@@ -372,7 +379,7 @@ export default function HomePage() {
   const plannedMeals = useMemo(
     () =>
       currentPlan
-        ? Object.values(currentPlan.meals).filter(Boolean).length
+        ? getAllRecipeIds(currentPlan.meals).length
         : 0,
     [currentPlan],
   );
@@ -467,16 +474,62 @@ export default function HomePage() {
     setModalMeal(null);
   };
 
-  const handleQuickSwap = (mealKey: MealKey) => {
+  const applyDishSelection = (
+    mealKey: MealKey,
+    recipeId: string,
+    dishIndex: number | "new",
+  ): boolean | null => {
+    if (!currentPlan) return null;
+
+    const slotIds = currentPlan.meals[mealKey] ?? [];
+    let nextIds: string[];
+
+    if (dishIndex === "new") {
+      if (
+        slotIds.length >= MAX_DISHES_PER_MEAL ||
+        slotIds.includes(recipeId)
+      ) {
+        return null;
+      }
+      nextIds = [...slotIds, recipeId];
+    } else {
+      if (dishIndex < 0 || dishIndex >= slotIds.length) return null;
+      nextIds = slotIds.map((id, index) =>
+        index === dishIndex ? recipeId : id,
+      );
+    }
+
+    nextIds = [...new Set(nextIds)];
+    const repeated = Object.entries(currentPlan.meals).some(
+      ([key, ids]) => key !== mealKey && ids.includes(recipeId),
+    );
+
+    persist({
+      ...currentPlan,
+      meals: { ...currentPlan.meals, [mealKey]: nextIds },
+    });
+
+    return repeated;
+  };
+
+  const handleQuickSwap = (
+    mealKey: MealKey,
+    dishIndex: number | "new" = 0,
+  ) => {
     if (!currentPlan) return;
-    const currentRecipe = findRecipe(recipes, currentPlan.meals[mealKey]);
-    if (!currentRecipe) return;
+
+    const slotIds = currentPlan.meals[mealKey] ?? [];
+    if (dishIndex === "new" && slotIds.length >= MAX_DISHES_PER_MEAL) {
+      notify("Este hueco ya tiene dos platos");
+      return;
+    }
 
     const usedIds = new Set(
       Object.entries(currentPlan.meals)
         .filter(([key]) => key !== mealKey)
-        .map(([, recipeId]) => recipeId),
+        .flatMap(([, recipeIds]) => recipeIds),
     );
+    const excludeIds = new Set(slotIds);
     const recentIds = getRecentRecipeIds(activePlans, currentPlan.weekStart);
     const season = getSeasonContext(
       currentPlan.weekStart,
@@ -484,49 +537,96 @@ export default function HomePage() {
     );
     const mealType = mealKey.endsWith("-comida") ? "comida" : "cena";
 
-    const replacement = pickRecipeForSlot({
-      requirement: {
-        category: currentRecipe.category,
-        fishKind: currentRecipe.fishKind,
-      },
-      mealType,
-      usedIds,
-      recentIds,
-      climate: season.climate,
-      excludeId: currentRecipe.id,
-      recipes,
-    });
+    let replacement: Recipe | undefined;
+
+    if (dishIndex === "new") {
+      replacement = pickExtraRecipeForSlot({
+        mealType,
+        usedIds,
+        recentIds,
+        climate: season.climate,
+        excludeIds,
+        recipes,
+      });
+    } else {
+      const currentRecipe = findRecipe(recipes, slotIds[dishIndex]);
+      if (!currentRecipe) return;
+
+      replacement = pickRecipeForSlot({
+        requirement: {
+          category: currentRecipe.category,
+          fishKind: currentRecipe.fishKind,
+        },
+        mealType,
+        usedIds,
+        recentIds,
+        climate: season.climate,
+        excludeId: currentRecipe.id,
+        excludeIds,
+        recipes,
+      });
+    }
 
     if (!replacement) {
-      notify("No hay otra opción disponible para este hueco");
+      notify(
+        dishIndex === "new"
+          ? "No hay otro plato disponible para añadir"
+          : "No hay otra opción disponible para este plato",
+      );
       return;
     }
 
-    persist({
-      ...currentPlan,
-      meals: { ...currentPlan.meals, [mealKey]: replacement.id },
-    });
-    notify("Plato cambiado");
+    applyDishSelection(mealKey, replacement.id, dishIndex);
+    notify(dishIndex === "new" ? "Segundo plato añadido" : "Plato cambiado");
   };
 
-  const handleSelect = (mealKey: MealKey, recipeId: string) => {
-    if (!currentPlan) return;
-    const repeated = Object.entries(currentPlan.meals).some(
-      ([key, id]) => key !== mealKey && id === recipeId,
+  const handleSelect = (
+    mealKey: MealKey,
+    recipeId: string,
+    dishIndex: number | "new",
+  ) => {
+    const repeated = applyDishSelection(mealKey, recipeId, dishIndex);
+    if (repeated === null) {
+      notify("No se pudo añadir el plato");
+      return;
+    }
+
+    notify(
+      dishIndex === "new"
+        ? "Segundo plato añadido"
+        : repeated
+          ? "Plato repetido en la semana"
+          : "Plato actualizado",
     );
-    persist({
-      ...currentPlan,
-      meals: { ...currentPlan.meals, [mealKey]: recipeId },
-    });
-    notify(repeated ? "Plato repetido en la semana" : "Plato actualizado");
+  };
+
+  const handleRemoveDish = (mealKey: MealKey, dishIndex: number) => {
+    if (!currentPlan) return;
+
+    const slotIds = currentPlan.meals[mealKey] ?? [];
+    if (dishIndex < 0 || dishIndex >= slotIds.length) return;
+
+    const nextIds = slotIds.filter((_, index) => index !== dishIndex);
+    const meals = { ...currentPlan.meals };
+    if (nextIds.length > 0) meals[mealKey] = nextIds;
+    else delete meals[mealKey];
+
+    persist({ ...currentPlan, meals });
+    notify(nextIds.length > 0 ? "Plato quitado" : "Hueco vacío");
   };
 
   const handleSwap = (from: MealKey, to: MealKey) => {
     if (!currentPlan) return;
     const meals = { ...currentPlan.meals };
-    const fromRecipe = meals[from];
-    meals[from] = meals[to];
-    meals[to] = fromRecipe;
+    const fromRecipes = meals[from] ?? [];
+    const toRecipes = meals[to] ?? [];
+
+    if (toRecipes.length > 0) meals[from] = toRecipes;
+    else delete meals[from];
+
+    if (fromRecipes.length > 0) meals[to] = fromRecipes;
+    else delete meals[to];
+
     persist({ ...currentPlan, meals });
     notify("Platos intercambiados");
   };
@@ -691,20 +791,23 @@ export default function HomePage() {
 
     let removed = 0;
     for (const plan of activePlans) {
-      const keys = Object.entries(plan.meals)
-        .filter(([, recipeId]) => recipeId === id)
-        .map(([key]) => key);
-      if (keys.length === 0) continue;
+      const meals: Record<string, string[]> = {};
+      let removedHere = 0;
 
-      removed += keys.length;
-      const meals = { ...plan.meals };
-      for (const key of keys) delete meals[key];
+      for (const [key, recipeIds] of Object.entries(plan.meals)) {
+        const nextIds = recipeIds.filter((recipeId) => recipeId !== id);
+        removedHere += recipeIds.length - nextIds.length;
+        if (nextIds.length > 0) meals[key] = nextIds;
+      }
+
+      if (removedHere === 0) continue;
+      removed += removedHere;
       persist({ ...plan, meals });
     }
 
     notify(
       removed > 0
-        ? `Plato eliminado y retirado de ${removed} ${removed === 1 ? "hueco" : "huecos"}`
+        ? `Plato eliminado y retirado de ${removed} ${removed === 1 ? "plato" : "platos"}`
         : "Plato eliminado del recetario",
     );
   };
@@ -1064,22 +1167,28 @@ export default function HomePage() {
                           <MealCard
                             mealKey={lunchKey}
                             mealType="comida"
-                            recipe={getPlanRecipe(currentPlan, lunchKey, recipes)}
-                            repeatCount={
-                              recipeCounts.get(currentPlan.meals[lunchKey]) ?? 0
+                            recipes={getPlanRecipes(currentPlan, lunchKey, recipes)}
+                            repeatCounts={recipeCounts}
+                            onOpen={(dishIndex) =>
+                              openMealModal(lunchKey, dishIndex)
                             }
-                            onOpen={() => setModalMeal(lunchKey)}
-                            onQuickSwap={() => handleQuickSwap(lunchKey)}
+                            onQuickSwap={() => handleQuickSwap(lunchKey, 0)}
+                            onRemoveExtra={(dishIndex) =>
+                              handleRemoveDish(lunchKey, dishIndex)
+                            }
                           />
                           <MealCard
                             mealKey={dinnerKey}
                             mealType="cena"
-                            recipe={getPlanRecipe(currentPlan, dinnerKey, recipes)}
-                            repeatCount={
-                              recipeCounts.get(currentPlan.meals[dinnerKey]) ?? 0
+                            recipes={getPlanRecipes(currentPlan, dinnerKey, recipes)}
+                            repeatCounts={recipeCounts}
+                            onOpen={(dishIndex) =>
+                              openMealModal(dinnerKey, dishIndex)
                             }
-                            onOpen={() => setModalMeal(dinnerKey)}
-                            onQuickSwap={() => handleQuickSwap(dinnerKey)}
+                            onQuickSwap={() => handleQuickSwap(dinnerKey, 0)}
+                            onRemoveExtra={(dishIndex) =>
+                              handleRemoveDish(dinnerKey, dishIndex)
+                            }
                           />
                         </div>
                       );
@@ -1110,7 +1219,7 @@ export default function HomePage() {
                 <p>
                   {activeShare
                     ? `${sharedOwner} todavía no ha planificado esta semana. Puedes generarla tú.`
-                    : "Genera 14 platos con el reparto equilibrado y la temporada que elijas."}
+                    : "Genera un plato para cada uno de los 14 huecos con el reparto equilibrado y la temporada que elijas."}
                 </p>
                 <button
                   className="btn btn-primary"
@@ -1142,7 +1251,7 @@ export default function HomePage() {
                 <p>
                   {activeShare
                     ? `Puedes cambiar los platos y la temporada; los cambios se guardan en la planificación de ${sharedOwner}. El recetario es común para todas las cuentas.`
-                    : "Toca cualquier plato para cambiarlo, repetirlo por sobras o moverlo a otro día. En el recetario puedes editar ingredientes y añadir tus propias recetas."}
+                    : "Toca cualquier plato para cambiarlo, repetirlo por sobras o moverlo a otro día. Puedes añadir un segundo plato a cualquier comida o cena. En el recetario puedes editar ingredientes y añadir tus propias recetas."}
                 </p>
               </div>
             </div>
@@ -1158,12 +1267,14 @@ export default function HomePage() {
       <MealModal
         open={Boolean(modalMeal)}
         mealKey={modalMeal}
+        dishIndex={modalDish}
         plan={currentPlan ?? null}
         plans={activePlans}
         recipes={recipes}
         seasonMode={currentPlan?.seasonMode ?? selectedSeason}
         onClose={closeMealModal}
         onSelect={handleSelect}
+        onRemove={handleRemoveDish}
         onSwap={handleSwap}
         onSuggest={handleQuickSwap}
       />
@@ -1196,8 +1307,8 @@ export default function HomePage() {
         title="¿Regenerar la semana?"
         description={
           activeShare
-            ? `Se elegirán 14 platos nuevos y se perderán los cambios manuales de esta semana en la planificación de ${sharedOwner}. La lista de la compra también se actualizará.`
-            : "Se elegirán 14 platos nuevos y se perderán los cambios manuales de esta semana. La lista de la compra también se actualizará."
+            ? `Se elegirá un plato nuevo para cada uno de los 14 huecos y se perderán los cambios manuales, incluidos los segundos platos, de esta semana en la planificación de ${sharedOwner}. La lista de la compra también se actualizará.`
+            : "Se elegirá un plato nuevo para cada uno de los 14 huecos y se perderán los cambios manuales, incluidos los segundos platos, de esta semana. La lista de la compra también se actualizará."
         }
         confirmLabel="Regenerar"
         icon={<RefreshCw size={22} />}

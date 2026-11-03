@@ -50,7 +50,11 @@ export interface Recipe {
 export interface WeekPlan {
   weekStart: string;
   seasonMode: SeasonMode;
-  meals: Record<string, string>;
+  /**
+   * Platos de cada hueco. El primero es el principal y marca el equilibrio
+   * semanal; el segundo es opcional y solo suma a la lista de la compra.
+   */
+  meals: Record<string, string[]>;
   createdAt: string;
   updatedAt: string;
 }

@@ -38,6 +38,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## Domain rules that look like bugs but are intentional
 
 - 14 slots: 7 lunches + 7 dinners, with category targets in `TARGETS` / `LUNCH_REQUIREMENTS` / `DINNER_REQUIREMENTS` (`lib/planner.ts`).
+- Each slot stores an ordered list of recipe ids (`meals: Record<string, string[]>`): the first dish is the main one and drives balance/stats, the optional second dish only adds ingredients to the shopping list. `normalizeMeals` in `lib/meals.ts` migrates old plans that stored a single id.
 - A repeated recipe counts as a separate meal for balance/stats, but `buildShoppingList` dedupes ingredients by recipe id (leftovers model). Do not "fix" the dedupe.
 - Generation avoids repeats within a week, but `pickRecipeForSlot` reuses used recipes when no unused candidate fits the slot. Manual repeats via the **Repetir** tab are intentional and ignore `mealSlots` (e.g. lunch leftovers for dinner).
 

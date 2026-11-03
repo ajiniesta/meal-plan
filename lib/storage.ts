@@ -1,3 +1,4 @@
+import { normalizeMeals } from "./meals";
 import {
   EMPTY_RECIPE_BOOK,
   normalizeRecipeBook,
@@ -53,7 +54,7 @@ export interface SharePlanResult {
 interface RemotePlanRow {
   week_start: string;
   season_mode: string;
-  meals: Record<string, string> | null;
+  meals: unknown;
   created_at: string;
   updated_at: string;
 }
@@ -181,6 +182,7 @@ function readLocalPlans(userId?: string | null): WeekPlan[] {
         return {
           ...item,
           seasonMode: isSeasonMode(item.seasonMode) ? item.seasonMode : "auto",
+          meals: normalizeMeals(item.meals),
           createdAt:
             typeof item.createdAt === "string" ? item.createdAt : now,
           updatedAt:
@@ -214,7 +216,7 @@ function rowToPlan(row: RemotePlanRow): WeekPlan {
   return {
     weekStart: row.week_start,
     seasonMode: isSeasonMode(row.season_mode) ? row.season_mode : "auto",
-    meals: row.meals ?? {},
+    meals: normalizeMeals(row.meals),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

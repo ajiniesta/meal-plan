@@ -92,6 +92,10 @@ export function InfoModal({ open, mode, syncError, onClose }: InfoModalProps) {
               Las legumbres, la pasta y el arroz van a la comida; las cenas son más ligeras.
               El pescado se reparte en uno blanco y uno azul.
             </p>
+            <p className="info-note">
+              Cada comida o cena admite un segundo plato opcional. El primer plato es el
+              principal y marca el equilibrio semanal; los dos suman a la lista de la compra.
+            </p>
           </section>
 
           <section className="info-section">

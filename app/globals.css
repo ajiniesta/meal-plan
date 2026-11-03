@@ -872,6 +872,118 @@ p {
   font-weight: 650;
 }
 
+.meal-card-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.meal-card-content > .meal-card-main {
+  flex: 0 0 auto;
+  padding-bottom: 4px;
+}
+
+.meal-emoji-pair {
+  font-size: 15px;
+  letter-spacing: -2px;
+}
+
+.meal-extra {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 7px 0 13px;
+}
+
+.meal-extra-button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 2px 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+}
+
+.meal-extra-plus {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.meal-extra-name {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.15;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.meal-extra-remove {
+  display: grid;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  place-items: center;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  opacity: 0;
+  transition:
+    opacity 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.meal-card:hover .meal-extra-remove,
+.meal-extra-remove:focus-visible {
+  opacity: 1;
+}
+
+.meal-extra-remove:hover {
+  color: #a84f3b;
+  background: rgba(168, 79, 59, 0.1);
+}
+
+.meal-add-extra {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 3px;
+  margin: 1px 10px 6px 13px;
+  padding: 3px 7px;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  background: var(--accent-soft);
+  border: 0;
+  border-radius: 999px;
+  transition: background 160ms ease;
+}
+
+.meal-add-extra:hover {
+  background: #e4ead9;
+}
+
+.meal-repeat-inline {
+  margin-left: 2px;
+  font-size: 7px;
+}
+
+.meal-card-content > .meal-category {
+  padding: 2px 30px 9px 13px;
+}
+
 .scroll-hint {
   display: none;
 }
@@ -986,6 +1098,17 @@ p {
   color: var(--muted);
   font-size: 10.5px;
   line-height: 1.45;
+}
+
+.balance-extra-note {
+  margin: -6px 0 14px;
+  padding: 8px 10px;
+  color: #6c6357;
+  font-size: 9.5px;
+  line-height: 1.4;
+  background: #faf7f0;
+  border: 1px solid #ece4d7;
+  border-radius: 11px;
 }
 
 .balance-list {
@@ -1454,6 +1577,36 @@ p {
   overflow-y: auto;
   scrollbar-color: #d7ccbc transparent;
   scrollbar-width: thin;
+}
+
+.modal-dish-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  background: #faf7f0;
+  border: 1px solid #ece4d7;
+  border-radius: 12px;
+}
+
+.modal-dish-context {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.modal-remove-dish {
+  flex: 0 0 auto;
+  color: #a84f3b;
+}
+
+.modal-remove-dish:hover {
+  color: #8f3f2f;
 }
 
 .ingredients-details {
@@ -3548,6 +3701,16 @@ p {
     bottom: 6px;
     width: 32px;
     height: 32px;
+  }
+
+  .meal-extra-remove {
+    width: 26px;
+    height: 26px;
+    opacity: 1;
+  }
+
+  .meal-add-extra {
+    padding: 5px 8px;
   }
 
   /* Objetivos táctiles más cómodos */
